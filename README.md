@@ -90,6 +90,9 @@ The costly effects are in OPTIONS > GRAPHICS (RAY TRACING, AMBIENT OCCLUSION, SU
 ILLUMINATION), and OPTIONS > DISPLAY has **RENDER SCALE** and **MAX FPS** to lighten the GPU.
 On an RTX, **ANTI-ALIASING: DLSS QUALITY** draws the 3D at two thirds of the size and rebuilds it
 sharp, about 30% lighter on the GPU than DLAA: the one to try first at 1440p, 4K or 120 Hz and above.
+DLSS BALANCED, PERFORMANCE and ULTRA PERFORMANCE draw it smaller still, for 4K and slower cards.
+Advanced: `dlss_model = k`, `m` or `l` in `save\settings.ini` forces NVIDIA's model for every mode
+(`auto`, the default: K, M for PERFORMANCE, L for ULTRA PERFORMANCE; K on RTX 20/30).
 
 ## More
 

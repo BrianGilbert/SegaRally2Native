@@ -40,8 +40,12 @@ class R3DRenderer {
 public:
     // msaa: samples per pixel (1 = off); aniso: max anisotropic taps (0 = no mipmaps);
     // dlaa: NVIDIA DLAA instead of MSAA (the presenter must have its extensions);
-    // dlss_quality: with it, the 3D drawn at two thirds of the size and upscaled (DLSS QUALITY)
-    bool init(VkPresenter& vk, float supersample, int msaa, int aniso, bool dlaa = false, bool dlss_quality = false);
+    // dlss_mode (with dlaa): 0 DLAA, 1 QUALITY, 2 BALANCED, 3 PERFORMANCE, 4 ULTRA
+    // PERFORMANCE: the 3D drawn smaller (dlss::MODE_SCALE) and upscaled.
+    // dlss_model: 0 AUTO, 1 K, 2 M, 3 L (dlss::preset_for)
+    bool init(VkPresenter& vk, float supersample, int msaa, int aniso, bool dlaa = false, int dlss_mode = 0,
+              int dlss_model = 0);
+    int dlss_preset() const { return dlss_preset_; }   // the NGX preset in use (dlss::PRESET_*), 0 without DLSS
     // Texture pack images the GPU can hold at once (TexturePack::set_max_slots)
     uint32_t texture_slots() const { return texture_slots_; }
     int msaa_samples() const { return int(samples_); }
@@ -273,7 +277,9 @@ private:
     Image exposure_;   // 1x1 R16F: average log brightness of the 3D image, eased from frame to frame
     VkPipeline compose_measure_ = VK_NULL_HANDLE;   // the composition in measure mode, blended into exposure_
     dlss::Dlaa dlaa_;
-    float upscale_ = 1.0f;      // DLSS: the 3D is drawn this many times smaller than it is shown (1: DLAA, or no DLSS)
+    float upscale_ = 1.0f;
+    uint32_t jitter_phases_ = 8;   // 8 per output pixel: 8 x upscale_^2 (8 DLAA, 18 QUALITY ... 72 ULTRA PERFORMANCE)
+    int dlss_preset_ = 0;      // DLSS: the 3D is drawn this many times smaller than it is shown (1: DLAA, or no DLSS)
     float light_gain_ = 1.0f;   // the --light-gain multiplier
     bool motion_pass_ = false;   // pipelines and targets carry motion vectors (DLAA started)
     VkImageView composed_view_ = VK_NULL_HANDLE;   // 3D image the composition samples

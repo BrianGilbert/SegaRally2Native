@@ -75,7 +75,12 @@ int main() {
                         "10F650,10D564", "--diff", "10F650@300", "--replay", "out/snap/snap_1.bin"}));
         CHECK(!q.dlaa && q.msaa == 4 && q.auto_scripts.size() == 2);
         Options d;
-        CHECK(parse(d, {"--aa", "dlss"}) && d.dlaa && d.dlss);
+        CHECK(parse(d, {"--aa", "dlss"}) && d.dlaa && d.dlss == 1 && d.dlss_model == 0);
+        Options b;   // the other DLSS modes and the model
+        CHECK(parse(b, {"--aa", "dlss_balanced", "--dlss-model", "m"}) && b.dlaa && b.dlss == 2 && b.dlss_model == 2);
+        CHECK(parse(b, {"--aa", "dlss_performance", "--dlss-model", "l"}) && b.dlss == 3 && b.dlss_model == 3);
+        CHECK(parse(b, {"--aa", "dlss_ultra", "--dlss-model", "auto"}) && b.dlss == 4 && b.dlss_model == 0);
+        CHECK(parse(b, {"--aa", "dlaa", "--dlss-model", "k"}) && b.dlaa && b.dlss == 0 && b.dlss_model == 1);
         CHECK(q.auto_scripts[1] == "start@20");
         CHECK(q.traces.size() == 1 && q.diff == "10F650@300" && q.replay == "out/snap/snap_1.bin");
     }
