@@ -23,7 +23,7 @@
 
 - **True widescreen**, not stretched, with the HUD at the corners.
 - **Ray tracing**: shadows, global illumination and reflections on the cars.
-- **Real dust**: billowing clouds and flying stones instead of flat sprites.
+- **Real dust**: billowing clouds and flying stones instead of the arcade's flat polygon trails.
 - **HD liveries and HUD**, redrawn for this port.
 - **Sharp and smooth**: NVIDIA DLAA and DLSS, or MSAA, and 120 / 144 Hz and above.
 - **Arcade sound**, with surround and headphone modes.
@@ -79,9 +79,10 @@ Your ROM, settings and textures are kept; files you edited are backed up to `out
 F11 or Alt+Enter toggles fullscreen. Everything else is in **Options**. In the selection screens
 "confirm with the pedal" means the accelerator. The gamepad rumbles with the wheel's force feedback.
 
-**Steering wheels (experimental)** are read through SDL, with force feedback. This has never been
-tested on a real wheel: the settings are in `save\wheel.ini`, and `set SR2_WHEEL_LOG=1` prints
-every axis and button you move. If you have one, please tell me how it goes in an issue.
+**Steering wheels (experimental)** are read through SDL, DirectInput included, with force feedback.
+Players report it working on Logitech, Thrustmaster, Fanatec, Moza and Simucube bases; I have no wheel,
+so I can't test them myself. The settings are in `save\wheel.ini`, and `set SR2_WHEEL_LOG=1`
+prints every axis and button you move. If yours gives trouble, please open an issue with that log.
 
 ## Performance
 
