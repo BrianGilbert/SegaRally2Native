@@ -13,6 +13,9 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[20] 15 November 2026
+- New DLSS modes: Balanced, Performance and Ultra Performance.
+
 [19] 15 November 2026
 - New SCREEN options: window, borderless or fullscreen, resolution, render scale, VSYNC (on/adaptive/off), max FPS and lower FPS in the background.
 - The game now keeps its own frame limit, even if VSYNC is forced off in the driver.
