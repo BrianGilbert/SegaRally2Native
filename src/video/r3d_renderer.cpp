@@ -84,13 +84,15 @@ struct R3DRenderer::ComposePush {
     float hud[4], sky[4], effects[4], motion[4];
 };
 
-ScreenLayout compute_layout(float win_w, float win_h, float max_aspect) {
+ScreenLayout compute_layout(float win_w, float win_h, float max_aspect, float px_aspect) {
     ScreenLayout l{};
-    float aspect = win_h > 0 ? win_w / win_h : 4.0f / 3.0f;
-    float max_w = SCREEN_H * std::max(max_aspect, float(SCREEN_W) / SCREEN_H);
+    l.px_aspect = px_aspect > 0 ? px_aspect : 1.0f;
+    // (in Model 3 pixels: a window's width counts px_aspect times fewer of them)
+    float aspect = win_h > 0 ? win_w / win_h / l.px_aspect : 4.0f / 3.0f;
+    float max_w = SCREEN_H * std::max(max_aspect / l.px_aspect, float(SCREEN_W) / SCREEN_H);
     l.view_w = std::clamp(SCREEN_H * aspect, float(SCREEN_W), max_w);
-    l.scale = std::min(win_w / l.view_w, win_h / SCREEN_H);
-    l.ox = (win_w - l.view_w * l.scale) / 2;
+    l.scale = std::min(win_w / (l.view_w * l.px_aspect), win_h / SCREEN_H);
+    l.ox = (win_w - l.view_w * l.scale * l.px_aspect) / 2;
     l.oy = (win_h - SCREEN_H * l.scale) / 2;
     l.game_x0 = (l.view_w - SCREEN_W) / 2;
     l.hud_x = std::min(l.game_x0, (SCREEN_H * 16.0f / 9.0f - SCREEN_W) / 2);
@@ -1887,7 +1889,7 @@ R3DRenderer::ComposePush R3DRenderer::compose_push(const Frame& f) const {
     float W = float(extent.width), H = float(extent.height);
     bool extend_back = back_layer_extended();
     const bool sr2_on = sr2_hud_on();
-    ComposePush pc{.scale = {lay.view_w * lay.scale / W, SCREEN_H * lay.scale / H},
+    ComposePush pc{.scale = {lay.view_w * lay.scale * lay.px_aspect / W, SCREEN_H * lay.scale / H},
                    .offset = {lay.ox / W, lay.oy / H},
                    .sharpen = {sharpen_, 0},
                    .window = {W, H},
@@ -2098,8 +2100,8 @@ void R3DRenderer::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D ext
     Frame f{};
     f.cmd = cmd;
     f.extent = extent;
-    f.lay = compute_layout(float(extent.width), float(extent.height), max_aspect_);
-    f.up_w = std::max(1u, uint32_t(f.lay.view_w * f.lay.scale * supersample_));
+    f.lay = compute_layout(float(extent.width), float(extent.height), max_aspect_, px_aspect_);
+    f.up_w = std::max(1u, uint32_t(f.lay.view_w * f.lay.scale * f.lay.px_aspect * supersample_));
     f.up_h = std::max(1u, uint32_t(SCREEN_H * f.lay.scale * supersample_));
     f.out_w = upscale_ > 1.0f ? std::max(1u, uint32_t(float(f.up_w) / upscale_ + 0.5f)) : f.up_w;
     f.out_h = upscale_ > 1.0f ? std::max(1u, uint32_t(float(f.up_h) / upscale_ + 0.5f)) : f.up_h;

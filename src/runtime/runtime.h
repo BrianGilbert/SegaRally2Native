@@ -60,6 +60,12 @@ extern std::atomic<bool> g_skip_attract, g_game_over_menu;
 // The game is in its attract (logos, title, demo, rankings, INSERT COIN):
 // app.cpp shows the author's credit over it
 extern std::atomic<bool> g_in_attract;
+// The game waits for START: its attract, or the credit / START screen before
+// SELECT GAME (EXPERIENCE ARCADE ORIGINAL: the pad's START is the cabinet's
+// START there, and the pause menu everywhere else; app_input.cpp)
+extern std::atomic<bool> g_wants_start;
+// ARCADE ORIGINAL: its CREDIT setting changed; the program restarts once in the attract (runtime.cpp, rt_event)
+extern std::atomic<bool> g_restart_program;
 // Widescreen: how much wider than 4:3 the 3D view is (set by the window,
 // 1 = 4:3) and the factor the game's horizontal field of view was last
 // widened by (the scene builder takes it back out of the projection)

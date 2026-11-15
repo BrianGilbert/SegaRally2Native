@@ -60,6 +60,18 @@ struct FrontendSettings {
     // operator settings word, RAM 0x4A9D18): 0 NORMAL, 1 HARD, 2 VERY HARD,
     // 3 VERY EASY, 4 EASY. It sets the time at the start and at each checkpoint
     int difficulty = 0;
+    // PLAY > ARCADE CLASSIC's race set-up, the other operator settings (GAME
+    // ASSIGNMENTS; runtime.cpp): GAME MODE 0 NORMAL / 1 SPECIAL, DEFAULT VIEW
+    // 0 DRIVER / 1 BEHIND, SPEED 1 KM/H / 0 MPH (the operator's defaults)
+    int game_mode = 0, default_view = 0, speed_kmh = 1;
+    // ASPECT: 0 AUTO (fills the window, up to 32:9), 1 32:9, 2 21:9, 3 16:9, 4 4:3 (the
+    // original picture, the HUD in its place). The widest picture: a wider window gets black bars
+    int aspect = 3;
+    bool free_play = true;   // ARCADE ORIGINAL (its pause menu): FREE PLAY, or a coin per game
+    // EXPERIENCE (the file's first section only): 0 PC EDITION, 1 ARCADE ORIGINAL. Each
+    // experience keeps its own settings: PC EDITION's at the top of the file, ARCADE
+    // ORIGINAL's in its [arcade] section
+    int experience = 0;
     bool smooth = true;     // the 3D drawn between game frames at the monitor's refresh rate
     int saturation = 100;   // colour saturation in % (100 = original, the default)
     int gamma = 100;        // gamma x 100 (100 = original, higher = brighter)
@@ -70,10 +82,25 @@ struct FrontendSettings {
     bool check_updates = true;     // at launch, news.txt on GitHub: a window with what is new and UPDATE NOW
     int news_seen = 0;             // the newest news.txt entry the player closed with LATER
 
-    // save/settings.ini; missing keys keep their current value
-    void load(const char* path);
+    // save/settings.ini; missing keys keep their current value. section: "" the
+    // file's first one (PC EDITION and the keys of the whole game), "arcade" ARCADE ORIGINAL's
+    void load(const char* path, const char* section = "");
     void save(const char* path) const;
-    std::string text() const;   // what save() writes: one "key = value" line per setting
+    // what save() writes: one "key = value" line per setting (section: without
+    // the keys of the whole game, EXPERIENCE and the update check)
+    std::string text(bool section = false) const;
+    // ARCADE ORIGINAL's settings before it has a section of its own: these (the
+    // screen, the sound, the controls) with the arcade's own look: the ROM's HUD
+    // and paint, no ray tracing or new effects, MOTION SMOOTH, ASPECT 4:3
+    FrontendSettings arcade_defaults() const;
+    // Those base values of ARCADE ORIGINAL (its [arcade] section's first time, and RESTORE ORIGINAL):
+    // everything but the screen (MODE, RESOLUTION, RENDER SCALE, VSYNC, MAX FPS...), the
+    // speakers and the controls, which stay the player's
+    void arcade_base();
+    // ASPECT as numbers: the widest picture (window width over height) and the
+    // shape of a pixel (4:3: the cabinet's 496 x 384 on a 4:3 monitor)
+    static float aspect_ratio(int aspect);
+    static float pixel_aspect(int aspect) { return aspect == 4 ? (4.0f / 3.0f) / (496.0f / 384.0f) : 1.0f; }
 };
 
 class Frontend {
@@ -108,7 +135,11 @@ public:
     std::vector<Action> take_actions();
     void request(Action a) { actions_.push_back(a); }   // as if chosen in the menu (SR2_AUTOQUIT)
 
-    FrontendSettings settings;
+    FrontendSettings settings;   // the experience running (EXPERIENCE: settings.experience, the choice for the next start)
+    // The other experience's settings (PC EDITION's while ARCADE ORIGINAL runs, and
+    // the other way round): kept as they are, saved with these (app.cpp)
+    FrontendSettings other;
+    bool arcade = false;    // ARCADE ORIGINAL is running: no main menu, a pause of its own
     int aa_at_launch = 0;   // anti-aliasing the renderer was started with
     int scale_at_launch = 100;   // RENDER SCALE the renderer was started with
     std::vector<std::pair<int, int>> resolutions;   // the monitor's (app.cpp, VkPresenter::display_modes)
@@ -152,12 +183,15 @@ private:
     enum Id {
         PLAY, OPTIONS, QUIT, BACK, RESUME, SETTINGS, QUIT_TO_MENU, TABS,
         RECORDS, ARCADE, GHOST,   // ARCADE, GHOST: PLAY's page
+        PAUSE_CREDIT, PAUSE_QUIT, PAUSE_RESTORE, PC_EDITION,   // ARCADE ORIGINAL's pause: FREE PLAY / COIN, QUIT GAME,
+                                                               // RESTORE ORIGINAL, BACK TO PC EDITION
         REC_ROW,                  // a row of RECORDS (nothing to change)
         DEBUG, DEBUG_COURSE, DEBUG_CAR, DEBUG_GEARS, DEBUG_TIME, DEBUG_GO,
         OPT_QUALITY,   // (no row: the first of the option ids, the ones >= it are options)
         OPT_DISPLAY, OPT_VOLUME, OPT_MUSIC, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SUN, OPT_SHADOWS, OPT_SOFT, OPT_HDR, OPT_SHARPEN, OPT_HUD, OPT_LIVERIES,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_VIBRATION, OPT_RT, OPT_MENU_MUSIC, OPT_REFLECT, OPT_GI, OPT_DUST, OPT_UPDATES,
         OPT_DIFFICULTY, OPT_CONNECTED, OPT_TRIGGERS, OPT_RESOLUTION, OPT_SCALE, OPT_VSYNC, OPT_MAXFPS, OPT_BGFPS,
+        OPT_EXPERIENCE, OPT_ASPECT, OPT_ARCADE_ASPECT,   // OPT_ARCADE_ASPECT: ARCADE ORIGINAL's, under EXPERIENCE
     };
     struct Item {
         Id id;
@@ -261,6 +295,25 @@ private:
     std::wstring restart_list() const;   // what waits for a restart, "" nothing
     void restart_choose(int button);
     void draw_restart();
+    // BACK TO PC EDITION (ARCADE ORIGINAL's pause): the same window, with this
+    // instead of the list; LATER goes back to the pause
+    std::wstring restart_note_;
+    // RESTORE ORIGINAL (ARCADE ORIGINAL's pause): the same window asks RESTORE / CANCEL
+    // first; RESTORE puts arcade_base() back, then RESTART NOW? if one of them needs it
+    bool restore_ask_ = false;
+    // ARCADE ORIGINAL's settings: these while it runs, else the other ones
+    FrontendSettings& arcade_side() { return arcade ? settings : other; }
+    const FrontendSettings& arcade_side() const { return arcade ? settings : other; }
+    // PLAY > ARCADE CLASSIC: the race set-up window over PLAY's page (DIFFICULTY,
+    // GAME MODE, DEFAULT VIEW, SPEED; then START RACE / BACK). Rows 0-3 the
+    // options, 4 START RACE, 5 BACK
+    bool setup_open_ = false;
+    int setup_sel_ = 4;
+    RECT setup_rects_[6]{};
+    void setup_change(int row, int dir);
+    void setup_choose(int row);
+    bool setup_key(int vk);
+    void draw_setup();
     // RESOLUTION's list: Enter or a click opens it over the description panel
     bool drop_open_ = false;
     int drop_sel_ = 0, drop_top_ = 0;     // the highlighted one, the first shown (resolutions, largest first)
@@ -329,7 +382,7 @@ private:
     bool wrap_ = false;
     // Settings sections (tab_of in frontend.cpp says where each option goes),
     // shown as a column at the left of the settings page
-    enum { DISPLAY_TAB, LIGHTING_TAB, AUDIO_TAB, CONTROLS_TAB, GAME_TAB };   // LIGHTING_TAB is shown as GRAPHICS
+    enum { EXPERIENCE_TAB, DISPLAY_TAB, LIGHTING_TAB, AUDIO_TAB, CONTROLS_TAB };   // LIGHTING_TAB is shown as GRAPHICS
     static constexpr int TAB_COUNT = 5;
     static const wchar_t* const TAB_NAMES[TAB_COUNT];
     static int tab_of(Id id);

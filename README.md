@@ -79,6 +79,10 @@ Your ROM, settings and textures are kept; files you edited are backed up to `out
 F11 or Alt+Enter toggles fullscreen. Everything else is in **Options**. In the selection screens
 "confirm with the pedal" means the accelerator. The gamepad rumbles with the wheel's force feedback.
 
+**OPTIONS > EXPERIENCE** picks **PC EDITION** (the menus, records and the new graphics) or **ARCADE
+ORIGINAL**: the cabinet as it was, from the SEGA logo and the attract, with free play or coins and
+its own settings. Its pause menu goes back to PC EDITION.
+
 **Steering wheels (experimental)** are read through SDL, DirectInput included, with force feedback.
 Players report it working on Logitech, Thrustmaster, Fanatec, Moza and Simucube bases; I have no wheel,
 so I can't test them myself. The settings are in `save\wheel.ini`, and `set SR2_WHEEL_LOG=1`

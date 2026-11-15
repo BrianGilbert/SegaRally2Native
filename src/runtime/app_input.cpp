@@ -90,7 +90,23 @@ bool poll_gamepads(HWND hwnd) {
         press_coin();
         coin_at = qpc_seconds();
     };
+    // ARCADE ORIGINAL: START is the cabinet's while the game waits for it (the
+    // attract, the credit screen), with a coin put in first when it takes coins
+    // (START a moment after it, as a player would); in a game it pauses
+    static double start_due = -1;
+    if (start_due >= 0 && qpc_seconds() >= start_due) {
+        press_start();
+        start_due = -1;
+    }
     auto start = [&] {
+        if (g_opt.arcade) {
+            if (!g_wants_start) pause = true;
+            else if (g_opt.free_play != 1 && g_in_attract) {
+                press_coin();
+                start_due = qpc_seconds() + 0.5;
+            } else press_start();
+            return;
+        }
         if (coin_at >= 0 && qpc_seconds() - coin_at < 30) {
             press_start();
             coin_at = -1;

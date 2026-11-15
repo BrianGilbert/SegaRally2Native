@@ -19,6 +19,13 @@ struct Options {
     bool show_boot = false;          // --boot: the power-on screens before the SEGA logo
     int difficulty = -1;             // --difficulty: the game's number (0 normal, 1 hard, 2 very hard,
                                      // 3 very easy, 4 easy) held in the operator settings; -1: as the EEPROM says
+    // The other operator settings PLAY's race set-up changes (GAME ASSIGNMENTS, docs/game_ram.md);
+    // -1: as the EEPROM says
+    int game_mode = -1;              // 0 NORMAL, 1 SPECIAL
+    int default_view = -1;           // 0 DRIVER (in the car), 1 BEHIND
+    int speed_kmh = -1;              // 0 MPH, 1 KM/H (the test menu's order)
+    int free_play = -1;              // COIN ASSIGNMENTS: 1 FREE PLAY, 0 coins; -1 as the EEPROM says
+    bool arcade = false;             // EXPERIENCE ARCADE ORIGINAL: the game as the cabinet ran it (app.cpp)
     // Picture
     float supersample = 1.0f;        // --scale: internal 3D resolution factor
     int msaa = 4;                    // --msaa: samples per pixel (1 = off)
@@ -28,6 +35,8 @@ struct Options {
     int dlss_model = 0;              // --dlss-model: 0 auto, 1 K, 2 M, 3 L
     int aniso = 8;                   // --aniso: anisotropic taps (0 = no mipmaps, original look)
     float max_aspect = 16.0f / 9.0f; // --aspect: widest 3D view (4:3 = original)
+    float pixel_aspect = 1.0f;       // the picture's pixels this much wider than tall (ASPECT 4:3: 1.032,
+                                     // the cabinet's 496x384 on a 4:3 monitor)
     bool pixel_2d = false;           // --pixel2d: 2D layers without xBR upscaling
     bool hud_centre = false;         // --hud-centre: keep the HUD in the 4:3 area (otherwise its corners go out, up to a 16:9 view's edges)
     bool trigger_rumble = true;      // --no-trigger-rumble: Xbox pads through XInput, no motors in the triggers

@@ -180,10 +180,14 @@ static void pacing_sample(double now, double display, double shown, const R3DFra
 // set is written back as the file had it, unless changed in the menu since
 // (a test run with --volume 0 once silenced the game for good)
 static FrontendSettings g_settings_file, g_settings_launch;
+// The other experience's settings (Frontend::other) and whether ARCADE ORIGINAL
+// runs: the file keeps PC EDITION's at the top and ARCADE ORIGINAL's in [arcade]
+static const FrontendSettings* g_other_settings = nullptr;
+static bool g_arcade_running = false;
 
-static std::vector<std::pair<std::string, std::string>> settings_lines(const FrontendSettings& s) {
+static std::vector<std::pair<std::string, std::string>> settings_lines(const FrontendSettings& s, bool section) {
     std::vector<std::pair<std::string, std::string>> lines;
-    std::string text = s.text();
+    std::string text = s.text(section);
     size_t p = 0;
     while (p < text.size()) {
         size_t end = text.find('\n', p);
@@ -197,7 +201,8 @@ static std::vector<std::pair<std::string, std::string>> settings_lines(const Fro
 }
 
 static void save_settings(const FrontendSettings& s) {
-    auto now = settings_lines(s), file = settings_lines(g_settings_file), launch = settings_lines(g_settings_launch);
+    const bool sec = g_arcade_running;   // the running experience's lines go in [arcade]
+    auto now = settings_lines(s, sec), file = settings_lines(g_settings_file, sec), launch = settings_lines(g_settings_launch, sec);
     auto find = [](const auto& lines, const std::string& key) -> const std::string* {
         for (const auto& l : lines) if (l.first == key) return &l.second;
         return nullptr;
@@ -207,6 +212,15 @@ static void save_settings(const FrontendSettings& s) {
         const std::string *f = find(file, l.first), *at_launch = find(launch, l.first);
         bool from_command_line = f && at_launch && *f != *at_launch;
         out += (from_command_line && l.second == *at_launch ? *f : l.second) + "\n";
+    }
+    if (!sec) {
+        if (g_other_settings) out += "[arcade]\n" + g_other_settings->text(true);
+    } else {   // PC EDITION's at the top, with the keys of the whole game as they are now
+        FrontendSettings top = g_other_settings ? *g_other_settings : s;
+        top.experience = s.experience;
+        top.check_updates = s.check_updates;
+        top.news_seen = s.news_seen;
+        out = top.text(false) + "[arcade]\n" + out;
     }
     if (FILE* fp = fopen("save/settings.ini", "w")) {
         fputs(out.c_str(), fp);
@@ -293,10 +307,18 @@ int main(int argc, char** argv) {
     // The menus (and the settings they save) are left out of test runs, so
     // those always start from the same defaults
     g_opt.menu = !options_disable_menu(argc, argv);
-    FrontendSettings ini;
+    FrontendSettings ini, other_ini;   // the experience to run, the other one (EXPERIENCE)
     bool aa_auto = false;   // the first run: the anti-aliasing chosen for the GPU and the screen (nvidia_card above)
     if (g_opt.menu) {   // save/settings.ini, written by the options menu; command-line options win
         ini.load("save/settings.ini");
+        // ARCADE ORIGINAL's own settings: its section, over the arcade's defaults
+        FrontendSettings arcade_ini = ini.arcade_defaults();
+        arcade_ini.load("save/settings.ini", "arcade");
+        if (ini.experience == 1) {
+            other_ini = ini;
+            ini = arcade_ini;
+            printf("[experience] ARCADE ORIGINAL\n");
+        } else other_ini = arcade_ini;
         aa_auto = !ini.aa_saved && nvidia_card();
         if (aa_auto) ini.aa = 1;   // DLAA; DLSS QUALITY or MSAA once the screen and the GPU are known
         options_from_settings(g_opt, ini);
@@ -436,8 +458,9 @@ int main(int argc, char** argv) {
         // Records and achievements: real games only, never the scripted or cheated test runs
         if (g_opt.menu && g_auto.events.empty() && !stats_test) stats_init();
         g_audio.start();
-        g_hold = g_opt.menu;   // the main menu comes first
-        g_skip_attract = g_opt.menu && g_auto.events.empty();   // the menu instead of the attract (runtime.cpp)
+        // the menu instead of the attract (runtime.cpp); ARCADE ORIGINAL: the game as it is, from its SEGA logo
+        g_hold = g_opt.menu && !g_opt.arcade;
+        g_skip_attract = g_opt.menu && g_auto.events.empty() && !g_opt.arcade;
         g_boot_skip = g_fast_idle = !g_opt.show_boot;
         g_sound.set_dsp_enabled(!g_boot_skip);
         g_sound.set_muted(g_boot_skip);
@@ -454,6 +477,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     renderer.set_max_aspect(g_opt.max_aspect);
+    renderer.set_pixel_aspect(g_opt.pixel_aspect);
     renderer.set_smooth_2d(!g_opt.pixel_2d);
     renderer.set_hud_edges(!g_opt.hud_centre);
     renderer.set_distance_haze(g_opt.haze);
@@ -629,6 +653,9 @@ int main(int argc, char** argv) {
         settings_from_options(s, g_opt);   // ...with the command-line options over it
         g_settings_file = ini;
         g_settings_launch = s;
+        frontend.other = other_ini;
+        frontend.arcade = g_arcade_running = g_opt.arcade;
+        g_other_settings = &frontend.other;
         frontend.aa_at_launch = s.aa;
         frontend.rt_available = renderer.ray_tracing_available();
         frontend.resolutions = presenter.display_modes();
@@ -650,13 +677,20 @@ int main(int argc, char** argv) {
         presenter.set_vsync(s.vsync);
         if (s.display_mode != 0 || (s.res_w > 0 && s.res_h > 0)) presenter.set_mode(s.display_mode, s.res_w, s.res_h);
         // the logo first (not when a debugging aid drives the menu)
-        if (getenv("LW_MENU_KEYS") || getenv("LW_MENU_SHOT") || getenv("SR2_RESTARTED")) frontend.open(Frontend::Screen::Main);
+        // ARCADE ORIGINAL: no logo, no main menu, no news: the game from its SEGA logo
+        if (g_opt.arcade) frontend.open(Frontend::Screen::None);
+        else if (getenv("LW_MENU_KEYS") || getenv("LW_MENU_SHOT") || getenv("SR2_RESTARTED")) frontend.open(Frontend::Screen::Main);
         else {
             frontend.open_splash();
             frontend.check_for_news();   // news.txt on GitHub while the logo plays
         }
-        g_menu_open = true;
+        g_menu_open = !g_opt.arcade;
         presenter.input_hook = [&](UINT msg, WPARAM wp, LPARAM lp) -> bool {
+            // A test run in the background (LW_BACKGROUND): the menus only take the scripted keys
+            // (LW_MENU_KEYS...), not the wheel or the pointer of someone working over the window
+            static const bool background = getenv("LW_BACKGROUND") != nullptr;
+            if (background && msg != WM_KEYDOWN) return msg == WM_MOUSEMOVE || msg == WM_LBUTTONDOWN ||
+                                                         msg == WM_RBUTTONDOWN || msg == WM_MOUSEWHEEL;
             int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
             if (!frontend.active()) {   // in the game: Esc pauses
                 if (msg == WM_KEYDOWN && wp == VK_ESCAPE) {
@@ -715,7 +749,7 @@ int main(int argc, char** argv) {
 
     // With the menu the game runs on to SELECT GAME behind it once booted (1 =
     // still to start that run), so PLAY shows it at once
-    int arcade_join = g_opt.menu ? 1 : 0;
+    int arcade_join = g_opt.menu && !g_opt.arcade ? 1 : 0;
     bool arcade_entered = false;
     bool play_waits = false;   // PLAY pressed while the game still gets to SELECT GAME
 
@@ -1143,14 +1177,14 @@ int main(int argc, char** argv) {
             RECT wrc;
             GetClientRect(presenter.hwnd(), &wrc);
             if (wrc.right > 0 && wrc.bottom > 0)
-                g_wide_view = compute_layout(float(wrc.right), float(wrc.bottom), g_opt.max_aspect).view_w / SCREEN_W;
+                g_wide_view = compute_layout(float(wrc.right), float(wrc.bottom), g_opt.max_aspect, g_opt.pixel_aspect).view_w / SCREEN_W;
         }
         if (toast_shown) {
-            for (int i : stats_take_new_achievements())
-                toast.push(achievement_table()[size_t(i)].name, achievement_table()[size_t(i)].text);
+            for (int i : stats_take_new_achievements())   // (ARCADE ORIGINAL: counted, not shown)
+                if (!g_opt.arcade) toast.push(achievement_table()[size_t(i)].name, achievement_table()[size_t(i)].text);
             // The author's credit over the attract (seen with the menu off, --no-menu)
             toast.set_credit(L"PC port by snicolast", L"github.com/snicolast/SegaRally2Native",
-                             g_in_attract && !g_menu_open && !g_boot_skip && !g_arcade_entry);
+                             g_in_attract && !g_menu_open && !g_boot_skip && !g_arcade_entry && !g_opt.arcade);
             RECT rc;
             GetClientRect(presenter.hwnd(), &rc);
             if (toast.draw(rc.right, rc.bottom, qpc_seconds(), toast_pixels))
@@ -1226,7 +1260,22 @@ int main(int argc, char** argv) {
                         shown = ~0ull;   // compose the 2D layer again even while the game stands still
                     }
                     g_opt.classic_liveries = !s.hd_liveries;   // the scene builders pick it up with their next frame
-                    g_opt.difficulty = s.difficulty;   // the game thread puts it in the operator settings
+                    if (!g_opt.arcade) {   // the race set-up: the game thread puts them in the operator settings
+                        g_opt.difficulty = s.difficulty;
+                        g_opt.game_mode = s.game_mode;
+                        g_opt.default_view = s.default_view;
+                        g_opt.speed_kmh = s.speed_kmh;
+                    } else if (g_opt.free_play != int(s.free_play)) {   // ARCADE ORIGINAL's pause: FREE PLAY / COIN
+                        g_opt.free_play = s.free_play;
+                        g_restart_program = true;   // (from its SEGA logo, once in the attract: runtime.cpp)
+                    }
+                    // ASPECT, at once (the running experience's)
+                    g_opt.max_aspect = FrontendSettings::aspect_ratio(s.aspect);
+                    g_opt.pixel_aspect = FrontendSettings::pixel_aspect(s.aspect);
+                    g_opt.hud_centre = s.aspect == 4;
+                    renderer.set_max_aspect(g_opt.max_aspect);
+                    renderer.set_pixel_aspect(g_opt.pixel_aspect);
+                    renderer.set_hud_edges(!g_opt.hud_centre);
                     if (g_opt.interp != s.smooth) {
                         g_opt.interp = s.smooth;
                         renderer.set_interpolation(1.0f);   // the latest game frame as it is
@@ -1258,13 +1307,15 @@ int main(int argc, char** argv) {
             // presents apart (out/menu_film/000.bmp...) in place of out/menu.bmp
             static const char* menu_film = getenv("LW_MENU_FILM");
             static int film_left = 0, film_every = 4, film_index = 0, film_wait = 0;
+            // (LW_MENU_FILM_DIR: another folder for the pictures than out/menu_film)
+            static const std::string film_dir = getenv("LW_MENU_FILM_DIR") ? getenv("LW_MENU_FILM_DIR") : "out/menu_film";
             static bool filming = false;
             // LW_MENU_FILM_NOW=1: filming from the first picture (the menu coming up), keys not waited for
             static bool film_now = getenv("LW_MENU_FILM_NOW") && menu_film &&
                                    sscanf(menu_film, "%d,%d", &film_left, &film_every) >= 1 && film_left > 0;
             if (film_now && !filming && film_index == 0) {
                 film_every = std::max(film_every, 2);
-                CreateDirectoryA("out/menu_film", nullptr);
+                CreateDirectoryA(film_dir.c_str(), nullptr);
                 filming = true;
                 menu_keys = nullptr;
             }
@@ -1284,8 +1335,8 @@ int main(int argc, char** argv) {
                     k += len;
                     if (*k == ',') k++;
                 }
-                char path[64];
-                snprintf(path, sizeof(path), "out/menu_film/%03d.bmp", film_index++);
+                char path[MAX_PATH];
+                snprintf(path, sizeof(path), "%s/%03d.bmp", film_dir.c_str(), film_index++);
                 presenter.capture_next(path);
                 if (--film_left <= 0) {
                     filming = false;
@@ -1312,7 +1363,7 @@ int main(int argc, char** argv) {
                     menu_keys = nullptr;
                     if (menu_film && sscanf(menu_film, "%d,%d", &film_left, &film_every) >= 1 && film_left > 0) {
                         film_every = std::max(film_every, 2);   // a capture needs the next present to finish
-                        CreateDirectoryA("out/menu_film", nullptr);
+                        CreateDirectoryA(film_dir.c_str(), nullptr);
                         filming = true;
                     } else {
                         presenter.capture_next("out/menu.bmp");
@@ -1365,6 +1416,20 @@ int main(int argc, char** argv) {
             }
             ui.set_motion(frontend.active() ? frontend.motion_backdrop() : -1);
             ui.set_freeze(frontend.active() && frontend.over_game() && frontend.pause_blur);
+            {   // ARCADE ORIGINAL: while the program restarts (CREDIT changed) black, not its last picture
+                static bool blank = false;
+                bool want = g_opt.arcade && g_boot_skip && !frontend.active();
+                if (want != blank) {
+                    blank = want;
+                    printf("[arcade] picture %s while the program starts\n", want ? "black" : "back");
+                    RECT rc;
+                    GetClientRect(presenter.hwnd(), &rc);
+                    if (want && rc.right > 0 && rc.bottom > 0) {
+                        std::vector<uint32_t> black(size_t(rc.right) * rc.bottom, 0xFF000000u);
+                        ui.set_image(black.data(), uint32_t(rc.right), uint32_t(rc.bottom));
+                    } else ui.hide();
+                }
+            }
         }
         double input_from = qpc_seconds();
         parts.menu = input_from - loop_from;
@@ -1836,6 +1901,16 @@ int main(int argc, char** argv) {
         SetEnvironmentVariableA("SR2_RESTARTED", "1");
         for (const char* aid : {"LW_MENU_KEYS", "LW_MENU_SHOT", "LW_MENU_FILM", "LW_MENU_FILM_KEYS", "LW_MENU_FILM_NOW"})
             SetEnvironmentVariableA(aid, nullptr);   // (debugging aids that drive one run only)
+        // Debugging aid: LW_RESTART_FILM / _FILM_KEYS / _AUTO: the restarted run films itself
+        // from its first picture (LW_MENU_FILM_NOW) into out/menu_film_r, with those keys and SR2_AUTO
+        if (const char* f = getenv("LW_RESTART_FILM")) {
+            SetEnvironmentVariableA("LW_MENU_FILM", f);
+            SetEnvironmentVariableA("LW_MENU_FILM_NOW", "1");
+            SetEnvironmentVariableA("LW_MENU_FILM_DIR", "out/menu_film_r");
+            if (const char* k = getenv("LW_RESTART_FILM_KEYS")) SetEnvironmentVariableA("LW_MENU_FILM_KEYS", k);
+            if (const char* a = getenv("LW_RESTART_AUTO")) SetEnvironmentVariableA("SR2_AUTO", a);
+            SetEnvironmentVariableA("LW_RESTART_FILM", nullptr);
+        }
         wchar_t exe[MAX_PATH];
         GetModuleFileNameW(nullptr, exe, MAX_PATH);
         std::wstring cmd = GetCommandLineW();

@@ -30,7 +30,21 @@ void options_from_settings(Options& o, const FrontendSettings& ini) {
     o.sharpen = ini.sharpen;
     o.classic_hud = !ini.hd_hud;
     o.classic_liveries = !ini.hd_liveries;
-    o.difficulty = ini.difficulty;
+    o.arcade = ini.experience == 1;
+    if (o.arcade) {   // ARCADE ORIGINAL: the operator's own settings (the EEPROM's), and its pause's FREE PLAY / COIN
+        o.difficulty = o.game_mode = o.default_view = o.speed_kmh = -1;
+        o.free_play = ini.free_play;
+    } else {   // PC EDITION: PLAY > ARCADE CLASSIC's race set-up
+        o.difficulty = ini.difficulty;
+        o.game_mode = ini.game_mode;
+        o.default_view = ini.default_view;
+        o.speed_kmh = ini.speed_kmh;
+        o.free_play = -1;
+    }
+    // ASPECT (--aspect wins): the widest picture, its pixels' shape, 4:3 keeps the HUD in its place
+    o.max_aspect = FrontendSettings::aspect_ratio(ini.aspect);
+    o.pixel_aspect = FrontendSettings::pixel_aspect(ini.aspect);
+    o.hud_centre = ini.aspect == 4;
     o.interp = ini.smooth;
     o.saturation = ini.saturation / 100.0f;
     o.gamma = ini.gamma / 100.0f;
@@ -60,6 +74,9 @@ void settings_from_options(FrontendSettings& s, const Options& o) {
     s.hd_hud = !o.classic_hud;
     s.hd_liveries = !o.classic_liveries;
     if (o.difficulty >= 0) s.difficulty = o.difficulty;
+    if (o.game_mode >= 0) s.game_mode = o.game_mode;
+    if (o.default_view >= 0) s.default_view = o.default_view;
+    if (o.speed_kmh >= 0) s.speed_kmh = o.speed_kmh;
     s.smooth = o.interp;
     s.saturation = std::clamp(int(o.saturation * 100 + 0.5f), 0, 200);
     s.gamma = std::clamp(int(o.gamma * 100 + 0.5f), 50, 150);

@@ -121,20 +121,40 @@ const int WEIGHTS[6] = {FW_BOLD, FW_BOLD, FW_NORMAL, FW_SEMIBOLD, FW_MEDIUM, FW_
 // The ini's names of the difficulties, in the game's numbering (FrontendSettings::difficulty)
 static const char* const DIFFICULTY_KEYS[5] = {"normal", "hard", "very_hard", "very_easy", "easy"};
 
-void FrontendSettings::load(const char* path) {
+void FrontendSettings::load(const char* path, const char* section) {
     FILE* f = fopen(path, "r");
     if (!f) return;
     struct ModeFromFullscreen {   // an older file: fullscreen = 1 was the borderless one
         FrontendSettings& s;
         ~ModeFromFullscreen() { if (!s.display_mode_saved) s.display_mode = s.fullscreen ? 1 : 0; }
     } mode_from_fullscreen{*this};
+    const bool top = !section || !*section;
+    std::string in_section;   // "" the first section, else the name of the last [name] line
     char line[512];
     while (fgets(line, sizeof(line), f)) {
+        char name[64];
+        if (sscanf(line, " [%63[^]]]", name) == 1) {
+            in_section = name;
+            continue;
+        }
+        if (top ? !in_section.empty() : in_section != section) continue;
         char key[64], value[64];
         if (sscanf(line, " %63[^= ] = %63s", key, value) != 2) continue;
         std::string k = key, v = value;
         bool on = v == "1" || v == "on" || v == "true";
-        if (k == "fullscreen") fullscreen = on;
+        // (the keys of the whole game only in the first section)
+        if (!top && (k == "experience" || k == "check_updates" || k == "news_seen")) continue;
+        if (k == "experience") experience = v == "arcade" ? 1 : 0;
+        else if (k == "aspect") {
+            static const char* const NAMES[5] = {"auto", "32:9", "21:9", "16:9", "4:3"};
+            for (int a = 0; a < 5; a++)
+                if (v == NAMES[a]) aspect = a;
+        }
+        else if (k == "game_mode") game_mode = v == "special" ? 1 : 0;
+        else if (k == "default_view") default_view = v == "behind" ? 1 : 0;
+        else if (k == "speed") speed_kmh = v == "mph" ? 0 : 1;
+        else if (k == "free_play") free_play = on;
+        else if (k == "fullscreen") fullscreen = on;
         else if (k == "display_mode") display_mode = v == "fullscreen" ? 2 : v == "borderless" ? 1 : 0, display_mode_saved = true;
         else if (k == "resolution") { if (sscanf(value, "%dx%d", &res_w, &res_h) != 2) res_w = res_h = 0; }
         else if (k == "render_scale") render_scale = std::clamp(atoi(value), 50, 200);
@@ -184,9 +204,10 @@ void FrontendSettings::load(const char* path) {
     fclose(f);
 }
 
-std::string FrontendSettings::text() const {
+std::string FrontendSettings::text(bool section) const {
     std::string out;
     char buf[2048];
+    if (!section) out += experience ? "experience = arcade\n" : "experience = pc\n";
     static const char* const AA[7] = {"msaa", "dlaa", "none", "dlss", "dlss_balanced", "dlss_performance", "dlss_ultra"};
     static const char* const MODELS[4] = {"auto", "k", "m", "l"};
     static const char* const BLOOM[4] = {"off", "low", "medium", "high"};   // also the vibration levels
@@ -208,9 +229,49 @@ std::string FrontendSettings::text() const {
     out += buf;
     snprintf(buf, sizeof(buf), "dlss_model = %s\n", MODELS[std::clamp(dlss_model, 0, 3)]);
     out += buf;
-    snprintf(buf, sizeof(buf), "check_updates = %d\nnews_seen = %d\nrt_reflections = %d\nglobal_illumination = %s\ndust = %s\ndifficulty = %s\nhd_liveries = %d\ntrigger_rumble = %d\n", check_updates, news_seen, reflections, gi ? "low" : "off", dust ? "enhanced" : "original", DIFFICULTY_KEYS[std::clamp(difficulty, 0, 4)], hd_liveries, trigger_rumble);
+    if (!section) {
+        snprintf(buf, sizeof(buf), "check_updates = %d\nnews_seen = %d\n", check_updates, news_seen);
+        out += buf;
+    }
+    snprintf(buf, sizeof(buf), "rt_reflections = %d\nglobal_illumination = %s\ndust = %s\ndifficulty = %s\nhd_liveries = %d\ntrigger_rumble = %d\n", reflections, gi ? "low" : "off", dust ? "enhanced" : "original", DIFFICULTY_KEYS[std::clamp(difficulty, 0, 4)], hd_liveries, trigger_rumble);
+    out += buf;
+    static const char* const ASPECTS[5] = {"auto", "32:9", "21:9", "16:9", "4:3"};
+    snprintf(buf, sizeof(buf), "aspect = %s\ngame_mode = %s\ndefault_view = %s\nspeed = %s\nfree_play = %d\n",
+             ASPECTS[std::clamp(aspect, 0, 4)], game_mode ? "special" : "normal", default_view ? "behind" : "driver",
+             speed_kmh ? "kmh" : "mph", free_play);
     out += buf;
     return out;
+}
+
+float FrontendSettings::aspect_ratio(int aspect) {
+    static const float RATIOS[5] = {32.0f / 9.0f, 32.0f / 9.0f, 64.0f / 27.0f, 16.0f / 9.0f, 4.0f / 3.0f};
+    return RATIOS[std::clamp(aspect, 0, 4)];
+}
+
+FrontendSettings FrontendSettings::arcade_defaults() const {
+    FrontendSettings a = *this;   // the screen, the speakers and the controls as in PC EDITION
+    a.experience = 1;
+    a.arcade_base();
+    return a;
+}
+
+void FrontendSettings::arcade_base() {
+    volume = FrontendSettings{}.volume;   // the effects and the music at their defaults, whatever PC EDITION has
+    music = FrontendSettings{}.music;
+    aa = 2;                               // no anti-aliasing: the Model 3 had none
+    aa_saved = true;                      // (not the first run's choice for the GPU, app.cpp)
+    hd_hud = hd_liveries = false;         // the ROM's own HUD, screens and car paint
+    smooth = true;                        // MOTION SMOOTH (Sergi's choice; PC EDITION's default too)
+    ray_tracing = 0;
+    reflections = false;
+    gi = 0;
+    dust = false;
+    sun = shadows = hdr = ao = haze = soft = sharpen = false;
+    bloom = 0;
+    saturation = gamma = 100;
+    cubic_samples = false;                // SAMPLE QUALITY ORIGINAL: the sound chip's own interpolation
+    aspect = 4;                           // the cabinet's 4:3 screen
+    free_play = true;
 }
 
 void FrontendSettings::save(const char* path) const {
@@ -308,7 +369,7 @@ void Frontend::shutdown() {
 
 // ---- Menu contents and navigation ----
 
-const wchar_t* const Frontend::TAB_NAMES[Frontend::TAB_COUNT] = {L"DISPLAY", L"GRAPHICS", L"AUDIO", L"CONTROLS", L"GAME"};
+const wchar_t* const Frontend::TAB_NAMES[Frontend::TAB_COUNT] = {L"EXPERIENCE", L"DISPLAY", L"GRAPHICS", L"AUDIO", L"CONTROLS"};
 
 // Every settings option: its tab, within the tab the order shown, and the
 // heading of each group of rows (on its first one). This is the one place to
@@ -316,7 +377,8 @@ const wchar_t* const Frontend::TAB_NAMES[Frontend::TAB_COUNT] = {L"DISPLAY", L"G
 // shown. Left out in Sega Rally 2: SOFT PARTICLES (only the spectators'
 // camera flashes). A tab whose rows do not fit the page scrolls.
 const Frontend::OptionTab Frontend::OPTION_TABS[] = {
-    {OPT_DISPLAY, DISPLAY_TAB, L"SCREEN"}, {OPT_RESOLUTION, DISPLAY_TAB}, {OPT_SCALE, DISPLAY_TAB}, {OPT_MOTION, DISPLAY_TAB},
+    {OPT_EXPERIENCE, EXPERIENCE_TAB, L"EDITION"}, {OPT_ARCADE_ASPECT, EXPERIENCE_TAB},
+    {OPT_DISPLAY, DISPLAY_TAB, L"SCREEN"}, {OPT_RESOLUTION, DISPLAY_TAB}, {OPT_ASPECT, DISPLAY_TAB}, {OPT_SCALE, DISPLAY_TAB}, {OPT_MOTION, DISPLAY_TAB},
     {OPT_VSYNC, DISPLAY_TAB}, {OPT_MAXFPS, DISPLAY_TAB}, {OPT_BGFPS, DISPLAY_TAB}, {OPT_AA, DISPLAY_TAB},
     {OPT_SAT, DISPLAY_TAB, L"PICTURE"}, {OPT_GAMMA, DISPLAY_TAB}, {OPT_SHARPEN, DISPLAY_TAB},
     {OPT_UPDATES, DISPLAY_TAB, L"UPDATES"},
@@ -327,12 +389,11 @@ const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_VOLUME, AUDIO_TAB, L"VOLUME"}, {OPT_MUSIC, AUDIO_TAB}, {OPT_MENU_MUSIC, AUDIO_TAB},
     {OPT_SPEAKERS, AUDIO_TAB, L"SOUND"}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
     {OPT_CONNECTED, CONTROLS_TAB, L"DEVICES"}, {OPT_VIBRATION, CONTROLS_TAB, L"GAMEPAD"}, {OPT_TRIGGERS, CONTROLS_TAB},
-    {OPT_DIFFICULTY, GAME_TAB, L"ARCADE"},
-};
+};   // (DIFFICULTY: in PLAY > ARCADE CLASSIC's race set-up)
 
 // Under each section's name in the column at the left
-static const wchar_t* const TAB_ABOUT[] = {L"Screen, smoothing, picture", L"Lighting, ray tracing, arcade art",
-                                           L"Volume, speakers, sound", L"Devices, vibration", L"Difficulty"};
+static const wchar_t* const TAB_ABOUT[] = {L"PC edition or the arcade as it was", L"Screen, smoothing, picture",
+                                           L"Lighting, ray tracing, arcade art", L"Volume, speakers, sound", L"Devices, vibration"};
 
 const wchar_t* Frontend::group_of(Id id) {
     for (const OptionTab& o : OPTION_TABS)
@@ -347,7 +408,7 @@ static const wchar_t* const RECORD_GROUPS[] = {L"UNLOCKED", L"LOCKED", L"TOTALS"
 int Frontend::tab_of(Id id) {
     for (const OptionTab& o : OPTION_TABS)
         if (o.id == id) return o.tab;
-    return GAME_TAB;
+    return -1;   // not shown
 }
 
 void Frontend::set_tab(int t) {
@@ -417,6 +478,14 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {BACK, L"BACK", L"", L"Return to the main menu"}};
     }
     case Screen::Pause:
+        if (arcade)   // ARCADE ORIGINAL: no main menu to go back to; its own entries last, as a group (draw_side_menu)
+            return {{RESUME, L"RESUME", L"", L"Back to the game"},
+                    {SETTINGS, L"SETTINGS", L"", L"Display, sound, controls and the experience"},
+                    {PAUSE_QUIT, L"QUIT GAME", L"", L"Close the game"},
+                    {PAUSE_CREDIT, L"CREDIT", settings.free_play ? L"FREE PLAY" : L"COIN",
+                     settings.free_play ? L"START begins a game, no coin needed" : L"A coin per game (5 or BACK); START adds one"},
+                    {PAUSE_RESTORE, L"RESTORE ORIGINAL", L"", L"The arcade's original settings (not the screen or the controls)"},
+                    {PC_EDITION, L"BACK TO PC EDITION", L"", L"The PC menu comes back on the next start"}};
         return {{RESUME, L"RESUME", L"", L"Back to the game"},
                 {SETTINGS, L"SETTINGS", L"", L"Display, sound and controls"},
                 {QUIT_TO_MENU, L"QUIT TO MAIN MENU", L"", L"Leave this game and go back to the main menu"}};
@@ -468,7 +537,24 @@ std::vector<Frontend::Item> Frontend::items() const {
         std::wstring scale_hint = L"The 3D drawn at this share of the picture's size: above 100% sharper and slower, below faster and softer";
         scale_hint += settings.render_scale != scale_at_launch ? L".  Applies after a restart (offered when you leave the settings)"
                                                                : L".  Applies after a restart";
-        std::vector<Item> all = {{OPT_DISPLAY, L"MODE", MODES[mode],
+        static const wchar_t* const ASPECTS[5] = {L"AUTO", L"32:9", L"21:9", L"16:9", L"4:3"};
+        auto aspect_hint = [](int a) -> std::wstring {
+            return a == 0   ? L"Fills the window, up to 32:9"
+                   : a == 4 ? L"The original arcade picture: the cabinet monitor's slightly wide pixels, the HUD in its place"
+                            : std::wstring(L"The picture at most ") + (a == 1 ? L"32:9" : a == 2 ? L"21:9" : L"16:9") +
+                                  L" wide: black bars at the sides of a wider window";
+        };
+        const FrontendSettings& arc = arcade_side();
+        std::vector<Item> all = {
+                {OPT_EXPERIENCE, L"EXPERIENCE", settings.experience ? L"ARCADE ORIGINAL" : L"PC EDITION",
+                 std::wstring(settings.experience
+                                  ? L"The cabinet as it was: straight to the SEGA logo and the attract, START to play, the original HUD and cars; Esc pauses"
+                                  : L"The PC remaster: the main menu, records, redrawn HUD and liveries, ray tracing and smooth motion") +
+                     (settings.experience != (arcade ? 1 : 0) ? L".  Applies after a restart (offered when you leave the settings)" : L"")},
+                {OPT_ARCADE_ASPECT, L"ASPECT", ASPECTS[std::clamp(arc.aspect, 0, 4)],
+                 L"ARCADE ORIGINAL: " + aspect_hint(arc.aspect)},
+                {OPT_ASPECT, L"ASPECT", ASPECTS[std::clamp(settings.aspect, 0, 4)], aspect_hint(settings.aspect)},
+                {OPT_DISPLAY, L"MODE", MODES[mode],
                  std::wstring(MODE_HINTS[mode]) + (pad_prompts ? L"" : L" (F11 or Alt+Enter: window / full screen)")},
                 {OPT_RESOLUTION, L"RESOLUTION", res, res_hints[mode], mode != 1 && !resolutions.empty()},
                 {OPT_SCALE, L"RENDER SCALE", std::to_wstring(settings.render_scale) + L"%", scale_hint},
@@ -552,8 +638,13 @@ std::vector<Frontend::Item> Frontend::items() const {
         std::vector<Item> list = {{TABS, L"", L"", pad_prompts ? L"LB / RB change the section"
                                                                : L"Q / E or Tab change the section, or click one"}};
         for (const OptionTab& o : OPTION_TABS)   // the tab's options in their order, then any not listed
-            for (const Item& it : all)
+            for (const Item& it : all) {
+                // ARCADE ORIGINAL's ASPECT under EXPERIENCE only when it is chosen; while it runs
+                // DISPLAY's is the same setting, so only the one under EXPERIENCE
+                if (it.id == OPT_ARCADE_ASPECT && !settings.experience) continue;
+                if (it.id == OPT_ASPECT && arcade) continue;
                 if (it.id == o.id && o.tab == tab_) list.push_back(it);
+            }
         list.push_back(
             {BACK, L"BACK", L"", options_from_pause_ ? L"Return to the pause menu" : L"Return to the main menu"});
         return list;
@@ -616,6 +707,8 @@ void Frontend::open(Screen s) {
         splash_.clear();
     }
     screen_ = s;
+    if (s != Screen::Play) setup_open_ = false;   // (the race set-up belongs to PLAY's page)
+    if (s != Screen::Pause && (!restart_note_.empty() || restore_ask_)) restart_note_.clear(), restore_ask_ = restart_open_ = false;
     selected_ = 0;
     scroll_ = 0;
     hovered_ = -1;
@@ -647,7 +740,29 @@ void Frontend::activate(const Item& it, int dir) {
     dirty_ = true;
     switch (it.id) {
     case PLAY: slide_to(Screen::Play, 0); break;
-    case ARCADE: push(Action::StartArcade); break;   // the arcade game as it was
+    case ARCADE:   // the race set-up first, then the arcade game as it was
+        setup_open_ = true;
+        setup_sel_ = 4;   // START RACE
+        break;
+    case PAUSE_CREDIT: settings.free_play = !settings.free_play; push(Action::SettingsChanged); break;
+    case PAUSE_QUIT: push(Action::Quit); break;
+    case PAUSE_RESTORE:   // RESTORE / CANCEL first (restart_choose)
+        restore_ask_ = restart_open_ = true;
+        restart_button_ = 0;
+        break;
+    case PC_EDITION:   // saved at once; RESTART NOW, or LATER (back to the pause)
+        settings.experience = 0;
+        push(Action::SettingsChanged);
+        restart_note_ = L"PC EDITION: the main menu comes back on the next start";
+        restart_open_ = true;
+        restart_button_ = 0;
+        break;
+    case OPT_EXPERIENCE:   // (each experience keeps what was changed in it; RESTORE ORIGINAL: the arcade's base values)
+        settings.experience ^= 1;
+        push(Action::SettingsChanged);
+        break;
+    case OPT_ASPECT: settings.aspect = (settings.aspect + dir + 5) % 5; push(Action::SettingsChanged); break;
+    case OPT_ARCADE_ASPECT: arcade_side().aspect = (arcade_side().aspect + dir + 5) % 5; push(Action::SettingsChanged); break;
     case GHOST: break;                               // coming soon
     case OPTIONS: options_from_pause_ = false; tab_ = 0; open(Screen::Options); selected_ = 1; break;
     case RECORDS: tab_ = 0; open(Screen::Records); selected_ = 1; break;
@@ -830,6 +945,7 @@ bool Frontend::key(int vk) {
     if (slide_from_ >= 0) finish_slide();   // the entries moving: in place at once, and the key does its job
     if (news_open_ && screen_ == Screen::Main) return news_key(vk);
     if (drop_open_) return drop_key(vk);
+    if (setup_open_ && screen_ == Screen::Play) return setup_key(vk);
     if (restart_open_) {
         switch (vk) {
         case VK_LEFT: case 'A': case VK_RIGHT: case 'D': case VK_TAB: restart_button_ ^= 1; dirty_ = true; break;
@@ -849,7 +965,7 @@ bool Frontend::key(int vk) {
     int n = int(list.size());
     bool option_row = selected_ < n && (list[selected_].id >= OPT_QUALITY || list[selected_].id == DEBUG_COURSE ||
                                         list[selected_].id == DEBUG_CAR || list[selected_].id == DEBUG_GEARS ||
-                                        list[selected_].id == DEBUG_TIME);
+                                        list[selected_].id == DEBUG_TIME || list[selected_].id == PAUSE_CREDIT);
     bool tabs_row = selected_ < n && list[selected_].id == TABS;
     if (screen_ == Screen::Records) switch (vk) {   // sections and rows as on the settings page; nothing to change
         case 'Q': case VK_PRIOR: case VK_LEFT: case 'A': set_tab(tab_ - 1); return true;
@@ -1067,6 +1183,11 @@ void Frontend::mouse_move(int x, int y) {
     if (screen_ == Screen::Splash) return;
     mouse_x_ = x;
     mouse_y_ = y;
+    if (setup_open_ && screen_ == Screen::Play) {   // the race set-up's rows and buttons
+        for (int r = 0; r < 6; r++)
+            if (PtInRect(&setup_rects_[r], POINT{x, y}) && r != setup_sel_) setup_sel_ = r, dirty_ = true;
+        return;
+    }
     if (news_open_ && screen_ == Screen::Main) {   // only its two buttons
         int hot = -1;
         for (int b = 0; b < 2; b++)
@@ -1096,6 +1217,14 @@ void Frontend::click(int x, int y) {
     if (restart_open_) {
         for (int b = 0; b < 2; b++)
             if (PtInRect(&restart_buttons_[b], p)) restart_choose(b);
+        return;
+    }
+    if (setup_open_ && screen_ == Screen::Play) {
+        for (int r = 0; r < 6; r++)
+            if (PtInRect(&setup_rects_[r], p)) {
+                setup_sel_ = r;
+                setup_choose(r);
+            }
         return;
     }
     if (drop_open_) {   // a resolution, or away from the list: closed
@@ -1143,6 +1272,11 @@ void Frontend::click(int x, int y) {
 
 void Frontend::wheel(int x, int y, int delta) {
     if (starting || screen_ == Screen::Splash || (news_open_ && screen_ == Screen::Main)) return;
+    if (setup_open_ && screen_ == Screen::Play) {   // over an option: change it
+        if (setup_sel_ < 4) setup_change(setup_sel_, delta > 0 ? +1 : -1);
+        return;
+    }
+    if (restart_open_) return;
     if (drop_open_) {
         drop_key(delta > 0 ? VK_UP : VK_DOWN);
         return;
@@ -1271,14 +1405,33 @@ std::wstring Frontend::restart_list() const {
     if (settings.render_scale != scale_at_launch) list = L"RENDER SCALE " + std::to_wstring(settings.render_scale) + L"%";
     if (settings.aa != aa_at_launch)
         list += (list.empty() ? L"" : L" and ") + std::wstring(L"ANTI-ALIASING ") + AA_NAMES[std::clamp(settings.aa, 0, 6)];
+    if (settings.experience != (arcade ? 1 : 0))
+        list += (list.empty() ? L"" : L" and ") + std::wstring(L"EXPERIENCE ") +
+                (settings.experience ? L"ARCADE ORIGINAL" : L"PC EDITION");
     return list;
 }
 
 void Frontend::restart_choose(int button) {
     dirty_ = true;
+    if (restore_ask_) {   // RESTORE ORIGINAL: RESTORE, or CANCEL (back to the pause)
+        restore_ask_ = restart_open_ = false;
+        if (button != 0) return;
+        settings.arcade_base();   // (not the screen, the speakers, the controls)
+        push(Action::SettingsChanged);
+        if (!restart_list().empty()) {   // e.g. ANTI-ALIASING back to OFF: RESTART NOW / LATER
+            restart_open_ = true;
+            restart_button_ = 0;
+        }
+        return;
+    }
     if (button == 0) {   // RESTART NOW: app.cpp saves, closes and starts the game again
         restart_open_ = false;
         push(Action::Restart);
+        return;
+    }
+    if (!restart_note_.empty() || screen_ == Screen::Pause) {   // BACK TO PC EDITION or a restore, LATER: the pause again (saved already)
+        restart_open_ = false;
+        restart_note_.clear();
         return;
     }
     back();   // LATER: on, as BACK (the prompt is not asked again)
@@ -1294,17 +1447,20 @@ void Frontend::draw_restart() {
     fill(x0, y0, x1, y1, PANEL, 1);
     frame(x0, y0, x1, y1, std::max(1, U(1)), PAGE_LINE, 1);
     fill(x0, y0, x1, y0 + std::max(2, U(4)), SABER, 1);
-    text(TITLE, U(52), L"RESTART THE GAME?", cx, y0 + U(30), 1, {0xFFFFFF, 0xE2EAF4, 0, 0, 1, U(3)});
+    text(TITLE, U(52), restore_ask_ ? L"RESTORE ORIGINAL?" : L"RESTART THE GAME?", cx, y0 + U(30), 1, {0xFFFFFF, 0xE2EAF4, 0, 0, 1, U(3)});
     int y = y0 + U(104);
-    for (const std::wstring& line : wrap(BODY, U(26), restart_list() + (restart_list().find(L" and ") != std::wstring::npos ? L" need a restart" : L" needs a restart"), pw - U(80))) {
+    std::wstring why = restore_ask_ ? std::wstring(L"The arcade's original sound, anti-aliasing, graphics, HUD, cars, MOTION, ASPECT and CREDIT. The screen, the speakers and the controls stay as they are")
+                       : !restart_note_.empty() ? restart_note_
+                       : restart_list() + (restart_list().find(L" and ") != std::wstring::npos ? L" need a restart" : L" needs a restart");
+    for (const std::wstring& line : wrap(BODY, U(26), why, pw - U(80))) {
         text(BODY, U(26), line, cx, y, 1, {GOLD_TOP, GOLD_BOTTOM});
         y += U(36);
     }
-    if (over_game()) {
+    if (over_game() && !restore_ask_) {
         text(BODY, U(22), L"The race in progress will be lost.  LATER keeps it", cx, y + U(4), 1, {0xFF9A8E, 0xFF9A8E});
         y += U(34);
     }
-    const wchar_t* names[2] = {L"RESTART NOW", L"LATER"};
+    const wchar_t* names[2] = {restore_ask_ ? L"RESTORE" : L"RESTART NOW", restore_ask_ ? L"CANCEL" : L"LATER"};
     int bw = U(280), bh = U(64), gap = U(40), bx = cx - bw - gap / 2, by = y1 - U(36) - bh;
     for (int b = 0; b < 2; b++) {
         int x = bx + b * (bw + gap);
@@ -1314,6 +1470,116 @@ void Frontend::draw_restart() {
         text(TITLE, U(38), names[b], x + bw / 2, by + bh / 2 - U(38) * 75 / 100, 1,
              sel ? Style{GOLD_TOP, GOLD_BOTTOM, 0, 0, 1, U(2)} : Style{PAGE_TEXT, PAGE_TEXT, 0, 0, 1, U(2)});
         restart_buttons_[b] = {x, by, x + bw, by + bh};
+    }
+}
+
+// ---- PLAY > ARCADE CLASSIC: the race set-up ----
+
+namespace {
+const wchar_t* const SETUP_LABELS[4] = {L"DIFFICULTY", L"GAME MODE", L"DEFAULT VIEW", L"SPEED"};
+}  // namespace
+
+void Frontend::setup_change(int row, int dir) {
+    FrontendSettings& s = settings;
+    switch (row) {
+    case 0: {
+        int at = 0;
+        for (int i = 0; i < 5; i++)
+            if (DIFFICULTY_ORDER[i] == s.difficulty) at = i;
+        s.difficulty = DIFFICULTY_ORDER[(at + dir + 5) % 5];
+        break;
+    }
+    case 1: s.game_mode ^= 1; break;
+    case 2: s.default_view ^= 1; break;
+    case 3: s.speed_kmh ^= 1; break;
+    default: return;
+    }
+    dirty_ = true;
+    push(Action::SettingsChanged);   // remembered (save/settings.ini) and handed to the game
+}
+
+void Frontend::setup_choose(int row) {
+    dirty_ = true;
+    if (row < 4) setup_change(row, +1);
+    else if (row == 4) {   // START RACE: the arcade game, with these
+        setup_open_ = false;
+        push(Action::StartArcade);
+    } else setup_open_ = false;   // BACK: PLAY's page
+}
+
+bool Frontend::setup_key(int vk) {
+    switch (vk) {
+    case VK_UP: case 'W': setup_sel_ = setup_sel_ >= 4 ? 3 : (setup_sel_ + 4) % 5; break;   // (from the first: START RACE)
+    case VK_DOWN: case 'S': setup_sel_ = setup_sel_ >= 4 ? 0 : setup_sel_ + 1; break;
+    case VK_LEFT: case 'A':
+        if (setup_sel_ < 4) setup_change(setup_sel_, -1);
+        else setup_sel_ = 4;
+        break;
+    case VK_RIGHT: case 'D':
+        if (setup_sel_ < 4) setup_change(setup_sel_, +1);
+        else setup_sel_ = 5;
+        break;
+    case VK_TAB: if (setup_sel_ >= 4) setup_sel_ ^= 1; break;
+    case VK_RETURN: case VK_SPACE: setup_choose(setup_sel_); break;
+    case VK_ESCAPE: case VK_BACK: setup_open_ = false; break;
+    default: return true;
+    }
+    dirty_ = true;
+    return true;
+}
+
+void Frontend::draw_setup() {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    constexpr uint32_t PAGE_TEXT = 0xEEF3FA, PAGE_DIM = 0x8A98AC, PAGE_LINE = 0x3A4458;   // (as the settings page's)
+    const FrontendSettings& s = settings;
+    const wchar_t* values[4] = {DIFFICULTY_NAMES[std::clamp(s.difficulty, 0, 4)], s.game_mode ? L"SPECIAL" : L"NORMAL",
+                                s.default_view ? L"BEHIND" : L"DRIVER", s.speed_kmh ? L"KM/H" : L"MPH"};
+    const wchar_t* hints[4] = {
+        L"The time you get at the start and at each checkpoint",
+        s.game_mode ? L"The cabinet's SPECIAL game: more time to start with (80 s instead of 50 on Desert)" : L"The arcade's normal game",
+        s.default_view ? L"The race starts with the camera behind the car (VIEW CHANGE switches it)"
+                       : L"The race starts in the driver's view (VIEW CHANGE switches it)",
+        s.speed_kmh ? L"The speedometer in kilometres per hour" : L"The speedometer in miles per hour"};
+    const int w = w_, h = h_;
+    fill(0, 0, w, h, 0x000000, 0.6f);
+    const int row_h = U(66), pw = std::min(U(820), w - U(80));
+    const int ph = U(150) + 4 * row_h + U(60) + U(64) + U(48);
+    const int x0 = (w - pw) / 2, y0 = std::max(U(20), (h - ph) / 2), x1 = x0 + pw, y1 = y0 + ph, cx = w / 2;
+    fill(x0, y0, x1, y1, PANEL, 0.97f);
+    frame(x0, y0, x1, y1, std::max(1, U(1)), PAGE_LINE, 1);
+    fill(x0, y0, x1, y0 + std::max(2, U(4)), SABER, 1);
+    text(TITLE, U(52), L"ARCADE CLASSIC", cx, y0 + U(26), 1, {0xFFFFFF, 0xE2EAF4, 0, 0, 1, U(3)});
+    text(ROW_MEDIUM, U(24), L"RACE OPTIONS", cx, y0 + U(94), 1, {PAGE_DIM, PAGE_DIM});
+    int y = y0 + U(140);
+    const int lx = x0 + U(56), vx = x1 - U(56);
+    for (int r = 0; r < 4; r++) {
+        bool sel = r == setup_sel_;
+        if (sel) ribbon(x0 + U(24), y, x1 - U(24), y + row_h, row_h * 30 / 100, 0.55f, 0.25f, U(8), U(6), 1);
+        else fill(x0 + U(40), y + row_h - 1, x1 - U(40), y + row_h, PAGE_LINE, 0.6f);
+        text(ROW, U(32), SETUP_LABELS[r], lx, y + row_h / 2 - U(21), 0,
+             sel ? Style{GOLD_TOP, GOLD_BOTTOM, 0, 0, 1, U(2)} : Style{PAGE_TEXT, PAGE_TEXT, 0, 0, 1, U(2)});
+        int ay = y + row_h / 2;
+        triangle(vx, ay, U(16), +1, sel ? 0xFFE08A : 0x8A98AC, 0.9f);
+        int vw = text(ROW, U(32), values[r], vx - U(22), ay - U(21), 2, {GOLD_TOP, GOLD_BOTTOM, 0, 0, 1, U(2)});
+        triangle(vx - U(44) - vw, ay, U(16), -1, sel ? 0xFFE08A : 0x8A98AC, 0.9f);
+        setup_rects_[r] = {x0 + U(24), y, x1 - U(24), y + row_h};
+        y += row_h;
+    }
+    // what the chosen option does (the buttons: what they do)
+    const wchar_t* about = setup_sel_ < 4 ? hints[setup_sel_]
+                           : setup_sel_ == 4 ? L"The arcade game with these options (remembered for the next time)"
+                                             : L"Back to PLAY";
+    text(BODY, U(22), about, cx, y + U(18), 1, {HINT, HINT});
+    const wchar_t* names[2] = {L"START RACE", L"BACK"};
+    int bw = U(280), bh = U(64), gap = U(40), bx = cx - bw - gap / 2, by = y1 - U(36) - bh;
+    for (int b = 0; b < 2; b++) {
+        int x = bx + b * (bw + gap);
+        bool sel = setup_sel_ == 4 + b;
+        if (sel) ribbon(x, by, x + bw, by + bh, bh * 30 / 100, 0.85f, 0.6f, U(8), U(6), 1);
+        else frame(x, by, x + bw, by + bh, std::max(1, U(1)), PAGE_LINE, 1);
+        text(TITLE, U(38), names[b], x + bw / 2, by + bh / 2 - U(38) * 75 / 100, 1,
+             sel ? Style{GOLD_TOP, GOLD_BOTTOM, 0, 0, 1, U(2)} : Style{PAGE_TEXT, PAGE_TEXT, 0, 0, 1, U(2)});
+        setup_rects_[4 + b] = {x, by, x + bw, by + bh};
     }
 }
 
@@ -1981,13 +2247,34 @@ void Frontend::draw_side_menu(const std::vector<Item>& list) {
     int item_px = std::min(U(58), spacing * 72 / 100);
     int y = y0;
     const bool on_main = screen_ == Screen::Main || screen_ == Screen::Play || screen_ == Screen::Pause;
-    auto row_sp = [&](int i) {   // the main menu: PLAY big, the others smaller under it
-        return on_main && list[i].id == PLAY ? U(104) : on_main ? U(62) : spacing;
+    // ARCADE ORIGINAL's pause: its own entries (CREDIT, RESTORE ORIGINAL, BACK TO PC EDITION)
+    // smaller, under a thin rule and the group's name
+    auto minor = [&](int i) {
+        return arcade && screen_ == Screen::Pause &&
+               (list[i].id == PAUSE_CREDIT || list[i].id == PAUSE_RESTORE || list[i].id == PC_EDITION);
     };
+    auto row_base = [&](int i) {   // the main menu: PLAY big, the others smaller under it
+        return minor(i) ? U(50) : on_main && list[i].id == PLAY ? U(104) : on_main ? U(62) : spacing;
+    };
+    auto heading_base = [&](int i) { return minor(i) && (i == 0 || !minor(i - 1)) ? U(58) : 0; };
+    // A short window (720p, 4:3): the entries, their headings and the chosen one's description
+    // closer together, down to 70%, so the column ends above the footer
+    float fit = 1;
+    {
+        int need = U(18);
+        for (int i = 0; i < n; i++) need += row_base(i) + heading_base(i);
+        if (selected_ >= 0 && selected_ < n)
+            need += U(14) + U(32) * int(wrap(ITEM, U(24), list[selected_].hint, col_w - U(20)).size());
+        int room = h - U(140) - y0;
+        if (need > room && need > 0) fit = std::max(0.7f, float(room) / float(need));
+    }
+    auto row_sp = [&](int i) { return int(float(row_base(i)) * fit); };
+    auto heading_before = [&](int i) { return int(float(heading_base(i)) * fit); };
+    const int hint_line = int(float(U(32)) * fit);
     if (selected_ >= 0 && selected_ < n) {   // the chosen one's ribbon, gliding there from the last one
         const Item& it = list[selected_];
-        int ty = y0;
-        for (int i = 0; i < selected_; i++) ty += row_sp(i);
+        int ty = y0 + heading_before(selected_);
+        for (int i = 0; i < selected_; i++) ty += row_sp(i) + heading_before(i);
         int gy, gsp;
         glide(glide_menu_, long(screen_) * 100003 + h_, ty, row_sp(selected_), gy, gsp);
         const int off = slide_offset(selected_), ix = tx + off;
@@ -2006,19 +2293,25 @@ void Frontend::draw_side_menu(const std::vector<Item>& list) {
         const Item& it = list[i];
         const int off = slide_offset(i), ix = tx + off;   // (sliding: further right)
         bool sel = i == selected_;
+        if (int hb = heading_before(i)) {   // the group's thin rule and name, as the settings page's headings
+            int lw = text(ROW_MEDIUM, U(21), L"ARCADE ORIGINAL", ix, y + hb / 2 - U(9), 2, {0xD8564A, 0xD8564A});
+            fill(ix - U(430), y + hb / 2 + U(4), ix - lw - U(16), y + hb / 2 + U(4) + std::max(1, U(1)), 0x3A4458, 1);
+            y += hb;
+        }
         const bool hero = on_main && it.id == PLAY;
         const int sp = row_sp(i);
-        const int px = hero ? U(92) : on_main ? U(46) : item_px;
+        const int px = std::min(minor(i) ? U(36) : hero ? U(92) : on_main ? U(46) : item_px, sp * 80 / 100);
         bool debug_row = it.id >= DEBUG && it.id <= DEBUG_GO;   // DEBUG and its rows in red: not part of the game
         const Style st = !it.enabled ? Style{DIM, DIM, EDGE, U(2), 0.9f, U(3)}
                          : sel       ? Style{GOLD_TOP, GOLD_BOTTOM, EDGE, U(2), 1, U(3)}
                          : debug_row ? Style{0xFF8A7A, 0xD8402E, EDGE, U(2), 0.95f, U(3)}
+                         : minor(i)  ? Style{0xB4C0D0, 0x8C98AA, EDGE, U(2), 0.9f, U(3)}
                                      : Style{PALE_TOP, PALE_BOTTOM, EDGE, U(2), 0.95f, U(3)};
         int ty = y + sp / 2 - px * 75 / 100;   // the capitals centred in the row (TITLE: they start 0.42 down, 0.67 high)
         int tw = text(TITLE, px, it.label, ix, ty, 2, st);
         if (sel && on_main && it.enabled && !gliding_)   // a chevron before the chosen one, once the ribbon is there
             triangle(ix - tw - U(28), y + sp / 2, U(22), +1, 0xFFE08A, 0.95f);
-        if (!it.value.empty() && screen_ == Screen::Debug) {   // DEBUG's choices: between arrows, left of the name
+        if (!it.value.empty() && (screen_ == Screen::Debug || it.id == PAUSE_CREDIT)) {   // choices: between arrows, left of the name
             int vx = ix - tw - U(40), vy = y + sp / 2;
             triangle(vx, vy, U(18), +1, sel ? 0xFFE08A : 0xB0B8C8, 0.9f);
             int vw = text(ITEM, U(30), it.value, vx - U(22), vy - U(19), 2, {GOLD_TOP, GOLD_BOTTOM, EDGE, U(2)});
@@ -2032,7 +2325,7 @@ void Frontend::draw_side_menu(const std::vector<Item>& list) {
             y += U(4);
             for (const std::wstring& line : wrap(ITEM, U(24), it.hint, col_w - U(20))) {
                 text(ITEM, U(24), line, ix, y, 2, {HINT, HINT});
-                y += U(32);
+                y += hint_line;
             }
             y += U(10);
         }
@@ -2518,6 +2811,8 @@ bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {
     }
     draw_side_menu(list);
     if (news_open_ && screen_ == Screen::Main) draw_news();
+    if (setup_open_ && screen_ == Screen::Play) draw_setup();
+    if (restart_open_ && screen_ == Screen::Pause) draw_restart();
     dirty_ = slide_from_ >= 0 || gliding_;   // moving: drawn again every refresh
     fade_in();
     return true;

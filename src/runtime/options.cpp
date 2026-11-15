@@ -93,6 +93,7 @@ const std::vector<Entry>& table() {
                [](Options& o, const char* v) {
                    const char* colon = strchr(v, ':');
                    o.max_aspect = colon ? float(atof(v) / atof(colon + 1)) : float(atof(v));
+                   o.pixel_aspect = 1.0f;   // (square pixels, whatever ASPECT says)
                }),
         real("--light-gain", &Options::light_gain, "multiply the sunlight and the ambient light (1)"),
         strength("--bloom", &Options::bloom, "glow around bright things, strength F (1)"),
