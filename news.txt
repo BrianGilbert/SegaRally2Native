@@ -13,6 +13,12 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[22] 16 November 2026
+- New OPTIONS > EXPERIENCE: PC EDITION (as before) or ARCADE ORIGINAL, which boots like the cabinet with the SEGA logo, attract mode and FREE PLAY or COIN.
+- ARCADE ORIGINAL keeps its own settings and has its own pause menu with CREDIT, RESTORE ORIGINAL and BACK TO PC EDITION.
+- PLAY > ARCADE CLASSIC now opens a window with DIFFICULTY, GAME MODE, DEFAULT VIEW and SPEED (the GAME tab is gone).
+- New ASPECT option in DISPLAY: AUTO, 32:9, 21:9, 16:9 or 4:3 (ultrawide not tried on real monitors yet).
+
 [21] 15 November 2026
 - Updating is more reliable: an update now always recompiles every file that changed, so it no longer fails to build when the game was updated more than once in a short time
 
