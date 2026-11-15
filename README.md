@@ -1,4 +1,4 @@
-<h1 align="center">Arcade rally, native on PC</h1>
+<h1 align="center">Nico Rally</h1>
 
 <p align="center">
   <b>An unofficial, fan-made recompilation of the 1998 arcade game Sega Rally 2.</b><br>
