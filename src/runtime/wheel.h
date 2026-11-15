@@ -17,6 +17,10 @@
 //     start, and an H shifter's gears 1-4 when the wheel has one
 //   - force feedback (SDL haptic): the game's own motor force as a constant
 //     force, plus a centring spring, with their strengths
+//   - pedals, an H shifter or a hand brake that are USB devices of their own
+//     (issue #73): pedals_device / shifter_device / handbrake_device name
+//     them (part of the name, or VID:PID), and their axes and buttons are
+//     then read there; handbrake_axis takes an analog hand brake
 // SR2_WHEEL_LOG=1 prints every axis and button that moves, to find them.
 #pragma once
 #include <cstdint>
