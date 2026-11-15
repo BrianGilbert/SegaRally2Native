@@ -38,6 +38,7 @@ struct Config {
     int shift_up = 4, shift_down = 5, view = 3, handbrake = 1, coin = 8, start = 9;
     int gear[4] = {-1, -1, -1, -1};   // H shifter buttons for gears 1..4
     int handbrake_axis = -1;          // an analog hand brake: on when pulled past half its travel
+    int handbrake_rest = NO_REST;     // its resting value, set by hand; else learnt
     int menu_accept = 0, menu_back = 2;   // in the menus (with the hat, the paddles and start)
     float ffb_strength = 0.7f;    // the game's motor force
     float ffb_spring = 0.25f;     // centring spring (0 = none)
@@ -53,6 +54,7 @@ const char* INI_TEXT =
     "; The wheel: part of its name as the log shows it ([joystick] lines), for when\n"
     "; a shifter, pedals or a button box is taken instead. Empty: the game picks a\n"
     "; device SDL knows as a wheel, then one with force feedback, then the first.\n"
+    "; Two devices with the same name (some Fanatec bases): add #2 for the second.\n"
     "device = %s\n"
     "\n"
     "; Pedals, an H shifter or a hand brake that are separate USB devices: part of\n"
@@ -90,8 +92,10 @@ const char* INI_TEXT =
     "shift_down = %d\n"
     "view = %d\n"
     "handbrake = %d\n"
-    "; or an analog hand brake: its axis (on when pulled past half its travel)\n"
+    "; or an analog hand brake: its axis (on when pulled past half its travel), and\n"
+    "; its resting value if it reads as pulled when released (remove the ';')\n"
     "handbrake_axis = %d\n"
+    "; handbrake_rest = -32768\n"
     "coin = %d\n"
     "start = %d\n"
     "; Menus and the pause screen: the hat (d-pad) moves, menu_accept and menu_back\n"
@@ -161,6 +165,7 @@ Config read_ini() {
         else if (k == "view") c.view = i;
         else if (k == "handbrake") c.handbrake = i;
         else if (k == "handbrake_axis") c.handbrake_axis = i;
+        else if (k == "handbrake_rest") c.handbrake_rest = std::clamp(i, -32768, 32767);
         else if (k == "coin") c.coin = i;
         else if (k == "start") c.start = i;
         else if (k == "menu_accept") c.menu_accept = i;
@@ -201,6 +206,8 @@ enum Role { PEDALS, SHIFTER, HANDBRAKE, ROLES };
 const char* const ROLE_NAMES[ROLES] = {"pedals", "shifter", "hand brake"};
 Wheel g_extra[ROLES];
 int g_alias[ROLES] = {PEDALS, SHIFTER, HANDBRAKE};
+bool g_on_wheel[ROLES] = {};   // the device named for it is the wheel itself
+int g_last_gear = -2;          // the H shifter's position at the last poll
 Wheel g_none;   // a device named in wheel.ini but not plugged in: reads nothing
 WheelState g_state;
 std::atomic<float> g_force{0}, g_shake{0};   // from the game thread (runtime.cpp ffb_frame)
@@ -221,13 +228,32 @@ const std::string& role_device(int r) {
 
 // Where a role's axes and buttons are read: its own device when wheel.ini names one
 Wheel& source(int r) {
-    if (role_device(r).empty()) return g_wheel;
+    if (role_device(r).empty() || g_on_wheel[r]) return g_wheel;
     Wheel& d = g_extra[g_alias[r]];
     return d.joy ? d : g_none;
 }
 
 // A device named in wheel.ini: VID:PID (hex), or part of its name in any case
-bool matches(uint32_t id, std::string want) {
+bool matches_plain(uint32_t id, std::string want);
+
+// "name #2": the second of the devices that match "name" (in the order SDL
+// found them), for drivers that give one base as two joysticks with the same name
+bool matches_nth(uint32_t id, const std::string& want) {
+    size_t hash = want.rfind('#');
+    int n = hash != std::string::npos && hash + 1 < want.size() ? atoi(want.c_str() + hash + 1) : 0;
+    if (n < 1) return matches_plain(id, want);
+    std::string base = want.substr(0, hash);
+    while (!base.empty() && base.back() == ' ') base.pop_back();
+    if (!matches_plain(id, base)) return false;
+    int count = 0, nth = 0;
+    SDL_JoystickID* ids = SDL_GetJoysticks(&count);
+    for (int i = 0; ids && i < count; i++)
+        if (ids[i] <= id && matches_plain(ids[i], base)) nth++;
+    SDL_free(ids);
+    return nth == n;
+}
+
+bool matches_plain(uint32_t id, std::string want) {
     if (want.empty()) return false;
     unsigned vid = 0, pid = 0;
     char extra = 0;
@@ -238,6 +264,10 @@ bool matches(uint32_t id, std::string want) {
     for (char& c : name) c = char(std::tolower((unsigned char)c));
     for (char& c : want) c = char(std::tolower((unsigned char)c));
     return name.find(want) != std::string::npos;
+}
+
+bool matches(uint32_t id, const std::string& want) {
+    return want.find('#') != std::string::npos ? matches_nth(id, want) : matches_plain(id, want);
 }
 
 float axis(const Wheel& w, int a) {
@@ -363,11 +393,20 @@ static void log_joystick(uint32_t id) {
 // Which of the joysticks is the wheel, when there are several (a shifter,
 // pedals, a button box... issue #33): the one named in wheel.ini, then one
 // SDL knows as a wheel, then one with force feedback, then the first
+// Between two that rank the same (a Fanatec base seen as two joysticks with
+// one name, issue #73), the one with force feedback
 static int pick_score(uint32_t id, SDL_Joystick* j, const char** why) {
-    if (matches(id, g_cfg.device)) return *why = "named in wheel.ini", 4;
-    if (SDL_GetJoystickTypeForID(id) == SDL_JOYSTICK_TYPE_WHEEL) return *why = "a wheel for SDL", 3;
-    if (SDL_IsJoystickHaptic(j)) return *why = "it has force feedback", 2;
-    return *why = "the first joystick", 1;
+    int haptic = SDL_IsJoystickHaptic(j) ? 1 : 0;
+    if (matches(id, g_cfg.device)) return *why = haptic ? "named in wheel.ini, with force feedback" : "named in wheel.ini", 8 + haptic;
+    if (SDL_GetJoystickTypeForID(id) == SDL_JOYSTICK_TYPE_WHEEL)
+        return *why = haptic ? "a wheel for SDL, with force feedback" : "a wheel for SDL", 6 + haptic;
+    if (haptic) return *why = "it has force feedback", 4;
+    return *why = "the first joystick", 2;
+}
+
+// Which roles read the wheel itself: their device is the one taken as the wheel
+static void refresh_roles() {
+    for (int r = 0; r < ROLES; r++) g_on_wheel[r] = g_wheel.joy && matches(g_wheel.id, role_device(r));
 }
 
 // Axes, buttons and the axes' resting values of a device just opened
@@ -398,6 +437,12 @@ static void set_pedal_rests() {
     };
     set_rest(g_cfg.gas_axis, g_cfg.gas_rest);
     set_rest(g_cfg.brake_axis, g_cfg.brake_rest);
+    Wheel& h = source(HANDBRAKE);
+    int a = g_cfg.handbrake_axis;
+    if (h.joy && g_cfg.handbrake_rest != NO_REST && a >= 0 && a < std::min(h.axes, 16)) {
+        h.rest[a] = int16_t(g_cfg.handbrake_rest);
+        h.rest_known[a] = true;
+    }
 }
 
 static void not_used(SDL_Joystick* j) {
@@ -419,7 +464,10 @@ void wheels_added(uint32_t id) {
     if (wheel_is_ours(id)) return;
     g_cfg = read_ini();
     bool extra = false;
-    for (int r = 0; r < ROLES; r++) {
+    // A device named for a role that is also the wheel (named as it, or a wheel
+    // for SDL) stays the wheel: the role reads it from there
+    bool wheel_like = matches(id, g_cfg.device) || SDL_GetJoystickTypeForID(id) == SDL_JOYSTICK_TYPE_WHEEL;
+    for (int r = 0; r < ROLES && !wheel_like; r++) {
         if (g_extra[g_alias[r]].joy || !matches(id, role_device(r))) continue;   // has its device, or not this one
         int q = 0;
         while (q < r && !(g_extra[q].joy && g_extra[q].id == id)) q++;
@@ -437,6 +485,7 @@ void wheels_added(uint32_t id) {
         extra = true;
     }
     if (extra) {
+        refresh_roles();
         set_pedal_rests();
         return;
     }
@@ -463,6 +512,7 @@ void wheels_added(uint32_t id) {
     Wheel& w = g_wheel;
     init_device(w, j, id);
     w.score = score;
+    refresh_roles();
     set_pedal_rests();
     const char* name = SDL_GetJoystickName(j);
     g_state = WheelState{};
@@ -484,6 +534,7 @@ void wheels_removed(uint32_t id) {
     }
     if (!g_wheel.joy || g_wheel.id != id) return;
     close_wheel();
+    refresh_roles();
     printf("[wheel] disconnected\n");
 }
 
@@ -570,18 +621,31 @@ void wheels_poll(bool focused, bool menu, std::vector<PadKey>& keys) {
         st.shift_down = pressed(g_cfg.shift_down);
         st.coin = pressed(g_cfg.coin);
         st.start = pressed(g_cfg.start);
+        // H shifter: given only when the stick moves (0 = to neutral), so the
+        // paddles still change gear while it stays put (issue #73)
         bool h_shifter = false;
-        st.gear = -1;
+        int gear = -1;
         for (int g = 0; g < 4; g++) {
             if (g_cfg.gear[g] < 0) continue;
             h_shifter = true;
-            if (held_on(shifter, g_cfg.gear[g])) st.gear = g + 1;
+            if (held_on(shifter, g_cfg.gear[g])) gear = g + 1;
         }
-        if (h_shifter && st.gear < 0) st.gear = 0;
+        if (h_shifter && gear < 0) gear = 0;
+        st.gear = gear != g_last_gear ? gear : -1;
+        g_last_gear = gear;
+        if (g_log) {   // what the game gets, to tell a pedal's travel from the game's own response
+            static int last[3] = {-1, -1, -1};
+            int now[3] = {int(st.gas * 20), int(st.brake * 20), st.handbrake ? 1 : 0};
+            if (now[0] != last[0] || now[1] != last[1] || now[2] != last[2])
+                printf("[wheel] to the game: gas %d%%, brake %d%%, hand brake %s\n", now[0] * 5, now[1] * 5,
+                       now[2] ? "on" : "off");
+            std::copy(now, now + 3, last);
+        }
     } else {
         st.steer = st.gas = st.brake = 0;
         st.view = st.handbrake = false;
         st.gear = -1;
+        g_last_gear = -2;   // back in the race: the stick's position counts again
     }
     if (menu) {
         if (pressed(g_cfg.menu_accept)) keys.push_back(PadKey::Accept);
