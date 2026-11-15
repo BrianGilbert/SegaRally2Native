@@ -1,11 +1,14 @@
-<p align="center">
-  <img src="docs/img/marquee.png" alt="Sega Rally 2" width="100%">
-</p>
+<h1 align="center">Arcade rally, native on PC</h1>
 
 <p align="center">
-  <b>Sega's 1998 arcade rally game, running natively on PC.</b><br>
-  Not an emulator: the original code, recompiled to C++, with a modern Vulkan renderer.
+  <b>An unofficial, fan-made recompilation of the 1998 arcade game Sega Rally 2.</b><br>
+  Not an emulator: the original program, recompiled to C++ on your own PC from your own copy, with a modern Vulkan renderer.
 </p>
+
+> [!IMPORTANT]
+> **Unofficial fan project.** Not affiliated with, endorsed or sponsored by SEGA. Nothing from the
+> original game is in this repository: no ROM, no code, no music or voices. To play you need your
+> own copy of the arcade game (`srally2.zip`), and the game is built from it on your PC.
 
 <p align="center">
   <a href="https://www.youtube.com/@snicolast"><img src="https://img.shields.io/badge/YouTube-@snicolast-red?logo=youtube&logoColor=white" alt="YouTube: snicolast"></a>
@@ -33,10 +36,6 @@
     <td><img src="docs/img/snow.jpg" alt="Snow thrown up by the wheels on the snowy stage"></td>
   </tr>
 </table>
-
-<p align="center">
-  <img src="docs/img/menu.jpg" alt="Main menu" width="100%">
-</p>
 
 ## ⚠️ ROM not included
 
@@ -123,6 +122,6 @@ port, a ROM, or anything made from one. I have never published any of them: ever
 game themselves from their own `srally2.zip`. Any ready-to-play download you find elsewhere is
 not from me, breaks the license, and is at your own risk.
 
-<sub>A fan project for personal use, not affiliated with or endorsed by Sega or by any of the car
-makers whose cars appear in the game. Sega Rally is a trademark of Sega; the car names and
+<sub>A fan project for personal use, not affiliated with or endorsed by SEGA or by any of the car
+makers whose cars appear in the game. Sega Rally is a trademark of SEGA; the car names and
 liveries belong to their owners.</sub>
