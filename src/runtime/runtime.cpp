@@ -112,6 +112,9 @@ std::atomic<int> g_arcade_entry{0};
 std::atomic<int> g_debug_jump{-1};
 std::atomic<bool> g_debug_freeze_time{false};
 std::atomic<bool> g_skip_attract{false}, g_game_over_menu{false}, g_in_attract{false};
+std::atomic<bool> g_wants_start{false};
+std::atomic<bool> g_restart_program{false};
+static uint64_t g_boot_from = 0;   // the frame the program (re)started on: the power-on screens' skip gives up 3000 after
 // Menus: the game stands still (and so does its sound) while set. The boot
 // screens still run through first, so Play starts at the SEGA logo.
 std::atomic<bool> g_hold{false};
@@ -1326,12 +1329,36 @@ void rt_event(Ctx& c) {
                 // (into 0x22CF18) and picks the time table's row with it. Only the RAM copy:
                 // the EEPROM keeps the operator's own setting
                 const int d = g_opt.difficulty;
-                if (d >= 0 && d <= 4) {
-                    constexpr uint32_t kSettings = 0x4A9D18, kMask = 0x00380000;
-                    uint32_t w = rd32(kSettings);
-                    uint32_t want = (w & ~kMask) | (uint32_t(d) << 19);
-                    if (w != want) wr32(kSettings, want);
+                constexpr uint32_t kSettings = 0x4A9D18;
+                uint32_t w = rd32(kSettings), want = w;
+                if (d >= 0 && d <= 4) want = (want & ~0x00380000u) | (uint32_t(d) << 19);
+                // PLAY's race set-up, the same way: GAME MODE (0 NORMAL, 1 SPECIAL), DEFAULT VIEW
+                // (0 DRIVER, 1 BEHIND), SPEED (0 MPH, 1 KM/H), each one bit of that word
+                auto bit = [&](int v, uint32_t mask) {
+                    if (v >= 0) want = v ? want | mask : want & ~mask;
+                };
+                bit(g_opt.game_mode, 0x00000020);
+                bit(g_opt.default_view, 0x00040000);
+                bit(g_opt.speed_kmh, 0x00002000);
+                if (w != want) wr32(kSettings, want);
+                // DEFAULT VIEW is copied into the game's structure when a credit starts the
+                // game (0x2C7D4: +0x20, 0xC9 DRIVER, 0xCA BEHIND), before SELECT GAME, where
+                // PLAY finds it already: written there too while the selects are on
+                // (GAME MODE is read at the race set-up, 0x46AAC: the bit is enough)
+                const int32_t step = int32_t(rd32(SR2_SELECT_STEP));
+                if (g_opt.default_view >= 0 && !in_attract() && step >= 3 && step < 15) {
+                    const uint32_t view = g_opt.default_view ? 0xCA : 0xC9;
+                    if (rd32(0x22CF34) != view) wr32(0x22CF34, view);
                 }
+            }
+            {   // FREE PLAY (EXPERIENCE ARCADE ORIGINAL, its pause menu): bit 0x00200000 of the COIN
+                // ASSIGNMENTS word, the EEPROM's copy in RAM the game reads (0x4A9D10: the credit
+                // checks at 0x1958, 0x2CAF8...; the test menu edits a copy of it at 0x222CC4).
+                // Only the RAM copy, as DIFFICULTY: the EEPROM keeps the operator's own setting
+                constexpr uint32_t kCoins = 0x4A9D10, kFreePlay = 0x00200000;
+                const int f = g_opt.free_play;
+                uint32_t w = rd32(kCoins);
+                if (f >= 0 && bool(w & kFreePlay) != bool(f)) wr32(kCoins, f ? w | kFreePlay : w & ~kFreePlay);
             }
             {   // SR2_POKE=ADDR=VALUE[@FROM[-TO]],...: a RAM word written every frame (from that frame on, or
                 // up to TO; finding the game's state, testing the achievements)
@@ -1384,12 +1411,17 @@ void rt_event(Ctx& c) {
             debug_time_frame();
             attract_guard_frame();   // before the frame's picture is taken
             g_in_attract = in_attract();
+            {
+                bool wants = in_attract() || rd32(SR2_START_STEP) != 4;
+                if (wants != g_wants_start.exchange(wants))
+                    printf("[play] %s START (frame %llu)\n", wants ?"waits for" : "past", (unsigned long long)g_frame);
+            }
             stats_frame();
             // The course of the race being run (round = course id + 6 x kind: championship,
             // practice, attract; docs/game_ram.md): 5 is SWEDISH, the Snowy course
             r3d_set_sr2_snowy(int32_t(rd32(0x22CF48)) % 6 == 5);
             video_snapshot();
-            bool boot_done = g_arcade_entry ? arcade_entry_frame() : (g_frame % 4 == 0 && boot_logo_up()) || g_frame > 3000;
+            bool boot_done = g_arcade_entry ? arcade_entry_frame() : (g_frame % 4 == 0 && boot_logo_up()) || g_frame > g_boot_from + 3000;
             if (g_boot_skip && boot_done) {
                 g_boot_skip = g_fast_idle = false;
                 g_sound.set_dsp_enabled(true);
@@ -1469,6 +1501,21 @@ void rt_event(Ctx& c) {
         }
     }
     schedule(c);
+    // ARCADE ORIGINAL's CREDIT changed (FREE PLAY / COIN): once the game is in its
+    // attract, the program restarts as on a cabinet whose operator changed the coin
+    // settings (as leaving the TEST menu does: exception() above), from its SEGA logo.
+    // Applied live, the attract wrote CREDIT 0 over FREE PLAY without clearing it
+    if (g_restart_program && !g_in_irq && !g_boot_skip && in_attract()) {
+        g_restart_program = false;
+        g_boot_skip = g_fast_idle = true;   // the power-on screens unseen, as at launch
+        g_boot_from = g_frame;
+        g_sound.set_dsp_enabled(false);
+        g_sound.set_muted(true);
+        printf("[play] CREDIT changed: the program restarts (frame %llu)\n", (unsigned long long)g_frame);
+        // 0x0: the program's own start, where leaving the TEST menu goes (0x4C enters the
+        // TEST menu first; writing the power-on sequence, -1, leaves the game stuck)
+        throw WarmRestart{0x0};
+    }
 }
 
 uint32_t rt_mfspr(Ctx& c, uint32_t spr) {
