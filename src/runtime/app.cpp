@@ -397,7 +397,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     printf("GPU: %s\n", presenter.device_name().c_str());
-    if (aa_auto) g_opt.dlss = screen_height(presenter.hwnd()) > 1440;
+    if (aa_auto) g_opt.dlss = screen_height(presenter.hwnd()) > 1440 ? 1 : 0;   // DLSS QUALITY above 1440p
     g_pads.trigger_rumble = g_opt.trigger_rumble;
     g_pads.init();
     timeBeginPeriod(1);
@@ -445,7 +445,7 @@ int main(int argc, char** argv) {
     }
 
     R3DRenderer renderer;
-    if (!renderer.init(presenter, g_opt.supersample, g_opt.msaa, g_opt.aniso, g_opt.dlaa, g_opt.dlss)) {
+    if (!renderer.init(presenter, g_opt.supersample, g_opt.msaa, g_opt.aniso, g_opt.dlaa, g_opt.dlss, g_opt.dlss_model)) {
         fprintf(stderr, "Could not start the 3D renderer\n");
         MessageBoxA(nullptr,
                     "Could not start the 3D renderer: the graphics card or its driver lacks something the game needs. "
@@ -471,14 +471,19 @@ int main(int argc, char** argv) {
     renderer.set_sharpen(g_opt.sharpen ? 0.5f : 0.0f);
     if (g_opt.haze > 0) printf("[video] distance haze on (strength %.2f)\n", g_opt.haze);
     if (aa_auto) {   // what the first run got: the menu shows it, and saves it with the first setting changed
-        if (!renderer.dlaa_active()) g_opt.dlaa = g_opt.dlss = false;
-        ini.aa = g_opt.dlss ? 3 : g_opt.dlaa ? 1 : 0;
+        if (!renderer.dlaa_active()) g_opt.dlaa = false, g_opt.dlss = 0;
+        ini.aa = g_opt.dlss ? 2 + g_opt.dlss : g_opt.dlaa ? 1 : 0;
         printf("[video] first run: anti-aliasing chosen for this GPU and screen\n");
     }
     if (g_opt.dlaa && !renderer.dlaa_active()) printf("[video] DLAA not available: using MSAA\n");
     if (renderer.dlaa_active())
         printf("[video] antialiasing NVIDIA %s, anisotropic filtering %dx%s\n",
-               renderer.dlss_upscaling() ? "DLSS (quality: the 3D at two thirds of the size)" : "DLAA", g_opt.aniso,
+               !renderer.dlss_upscaling() ? "DLAA"
+               : g_opt.dlss == 2          ? "DLSS BALANCED"
+               : g_opt.dlss == 3          ? "DLSS PERFORMANCE"
+               : g_opt.dlss == 4          ? "DLSS ULTRA PERFORMANCE"
+                                          : "DLSS QUALITY",
+               g_opt.aniso,
                g_opt.aniso > 0 ? " with mipmaps" : " (no mipmaps)");
     else
         printf("[video] antialiasing MSAA %dx, anisotropic filtering %dx%s\n", renderer.msaa_samples(), g_opt.aniso,

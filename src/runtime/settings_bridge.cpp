@@ -12,8 +12,9 @@ void options_from_settings(Options& o, const FrontendSettings& ini) {
     o.speakers = ini.speakers;
     o.cubic_samples = ini.cubic_samples;
     o.rear_boost = ini.rear_boost;
-    o.dlaa = ini.aa == 1 || ini.aa == 3;
-    o.dlss = ini.aa == 3;
+    o.dlaa = ini.aa == 1 || ini.aa >= 3;
+    o.dlss = ini.aa >= 3 ? ini.aa - 2 : 0;   // 3 QUALITY .. 6 ULTRA PERFORMANCE
+    o.dlss_model = ini.dlss_model;
     if (ini.aa == 2) o.msaa = 1;
     o.haze = ini.haze ? 1.0f : 0.0f;
     o.bloom = BLOOM_STRENGTH[ini.bloom];
@@ -42,7 +43,8 @@ void settings_from_options(FrontendSettings& s, const Options& o) {
     s.speakers = std::clamp(o.speakers, 0, 2);
     s.cubic_samples = o.cubic_samples;
     s.rear_boost = std::clamp(o.rear_boost / 3 * 3, 0, 12);
-    s.aa = o.dlss ? 3 : o.dlaa ? 1 : o.msaa <= 1 ? 2 : 0;
+    s.aa = o.dlss ? 2 + std::clamp(o.dlss, 1, 4) : o.dlaa ? 1 : o.msaa <= 1 ? 2 : 0;
+    s.dlss_model = std::clamp(o.dlss_model, 0, 3);
     s.haze = o.haze > 0;
     s.bloom = o.bloom <= 0 ? 0 : o.bloom < 0.8f ? 1 : o.bloom < 1.3f ? 2 : 3;
     s.ao = o.ao > 0;

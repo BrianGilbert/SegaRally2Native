@@ -147,7 +147,11 @@ void FrontendSettings::load(const char* path) {
         else if (k == "speakers") speakers = v == "surround" ? 1 : v == "headphones" ? 2 : 0;
         else if (k == "rear_boost") rear_boost = std::clamp(atoi(value) / 3 * 3, 0, 12);
         else if (k == "sample_interpolation") cubic_samples = v != "linear";
-        else if (k == "aa") aa = v == "dlaa" ? 1 : v == "dlss" ? 3 : (v == "none" || v == "off") ? 2 : 0, aa_saved = true;
+        else if (k == "aa") {   // ("dlss" is DLSS QUALITY, as before the other modes)
+            aa = v == "dlaa" ? 1 : v == "dlss" || v == "dlss_quality" ? 3 : v == "dlss_balanced" ? 4
+               : v == "dlss_performance" ? 5 : v == "dlss_ultra" ? 6 : (v == "none" || v == "off") ? 2 : 0;
+            aa_saved = true;
+        } else if (k == "dlss_model") dlss_model = v == "k" ? 1 : v == "m" ? 2 : v == "l" ? 3 : 0;
         else if (k == "haze") haze = on;
         else if (k == "bloom") bloom = v == "low" ? 1 : v == "medium" ? 2 : v == "high" ? 3 : on ? 2 : 0;
         else if (k == "ao") ao = on;
@@ -183,7 +187,8 @@ void FrontendSettings::load(const char* path) {
 std::string FrontendSettings::text() const {
     std::string out;
     char buf[2048];
-    static const char* const AA[4] = {"msaa", "dlaa", "none", "dlss"};
+    static const char* const AA[7] = {"msaa", "dlaa", "none", "dlss", "dlss_balanced", "dlss_performance", "dlss_ultra"};
+    static const char* const MODELS[4] = {"auto", "k", "m", "l"};
     static const char* const BLOOM[4] = {"off", "low", "medium", "high"};   // also the vibration levels
     static const char* const SPEAKERS[3] = {"stereo", "surround", "headphones"};
     static const char* const RT_MODES[3] = {"off", "shadows", "ao"};
@@ -191,7 +196,7 @@ std::string FrontendSettings::text() const {
                "saturation = %d\ngamma = %.2f\nmotion = %s\nspeakers = %s\nrear_boost = %d\nsample_interpolation = %s\n"
                "vibration = %s\nray_tracing = %s\n"
                "splash_screens = %d\nmenu_music = %d\n",
-            display_mode != 0, volume, music, AA[aa], haze, BLOOM[bloom], ao, sun, shadows, soft, hdr, sharpen, hd_hud, saturation,
+            display_mode != 0, volume, music, AA[std::clamp(aa, 0, 6)], haze, BLOOM[bloom], ao, sun, shadows, soft, hdr, sharpen, hd_hud, saturation,
             gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
             BLOOM[vibration], RT_MODES[ray_tracing],
             splash, menu_music);
@@ -200,6 +205,8 @@ std::string FrontendSettings::text() const {
     std::string fps = max_fps < 0 ? "unlimited" : max_fps == 0 ? "monitor" : std::to_string(max_fps);
     snprintf(buf, sizeof(buf), "display_mode = %s\nresolution = %dx%d\nrender_scale = %d\nvsync = %s\nmax_fps = %s\nbackground_fps = %d\n",
              MODES[std::clamp(display_mode, 0, 2)], res_w, res_h, render_scale, vsync == 2 ? "adaptive" : vsync ? "on" : "off", fps.c_str(), background_fps);
+    out += buf;
+    snprintf(buf, sizeof(buf), "dlss_model = %s\n", MODELS[std::clamp(dlss_model, 0, 3)]);
     out += buf;
     snprintf(buf, sizeof(buf), "check_updates = %d\nnews_seen = %d\nrt_reflections = %d\nglobal_illumination = %s\ndust = %s\ndifficulty = %s\nhd_liveries = %d\ntrigger_rumble = %d\n", check_updates, news_seen, reflections, gi ? "low" : "off", dust ? "enhanced" : "original", DIFFICULTY_KEYS[std::clamp(difficulty, 0, 4)], hd_liveries, trigger_rumble);
     out += buf;
@@ -374,7 +381,8 @@ constexpr int DEBUG_CAR_COUNT = int(sizeof(DEBUG_CARS) / sizeof(DEBUG_CARS[0]));
 
 std::vector<Frontend::Item> Frontend::items() const {
     auto on_off = [](bool v) { return std::wstring(v ? L"ON" : L"OFF"); };
-    static const wchar_t* const AA[4] = {L"MSAA 4X", L"DLAA", L"OFF", L"DLSS QUALITY"};
+    static const wchar_t* const AA[7] = {L"MSAA 4X", L"DLAA", L"OFF", L"DLSS QUALITY", L"DLSS BALANCED",
+                                         L"DLSS PERFORMANCE", L"DLSS ULTRA PERFORMANCE"};
     static const wchar_t* const BLOOM_LEVELS[4] = {L"OFF", L"LOW", L"MEDIUM", L"HIGH"};
     static const wchar_t* const SPEAKERS[3] = {L"STEREO", L"SURROUND 4.0", L"HEADPHONES"};
     static const wchar_t* const SPEAKER_HINTS[3] = {
@@ -413,11 +421,17 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {SETTINGS, L"SETTINGS", L"", L"Display, sound and controls"},
                 {QUIT_TO_MENU, L"QUIT TO MAIN MENU", L"", L"Leave this game and go back to the main menu"}};
     case Screen::Options: {
-        std::wstring aa_hint = settings.aa != aa_at_launch
-                                   ? L"Edge smoothing.  Takes effect the next time the game starts"
-                                   : settings.aa == 3
-                                         ? L"NVIDIA DLSS: the 3D drawn at two thirds of the size and rebuilt sharp, much lighter on the graphics card"
-                                         : L"Edge smoothing (MSAA, NVIDIA DLAA or DLSS, or off).  Applies on the next start";
+        static const wchar_t* const AA_HINTS[7] = {
+            L"Classic edge smoothing",
+            L"NVIDIA DLAA: the cleanest edges, at full size",
+            L"No edge smoothing: the fastest, with jagged edges",
+            L"NVIDIA DLSS: draws the 3D smaller and sharpens it back; much faster, nearly as sharp",
+            L"NVIDIA DLSS: draws the 3D smaller still and sharpens it back; faster, slightly softer",
+            L"NVIDIA DLSS: draws the 3D at half size and sharpens it back; for 4K or slower cards",
+            L"NVIDIA DLSS: draws the 3D at a third of the size; the fastest, the softest"};
+        std::wstring aa_hint = std::wstring(AA_HINTS[std::clamp(settings.aa, 0, 6)]) +
+                               (settings.aa != aa_at_launch ? L".  Applies after a restart (offered when you leave the settings)"
+                                                            : L".  Applies after a restart");
         wchar_t gamma_text[16];
         swprintf(gamma_text, 16, L"%.2f", settings.gamma / 100.0);
         static const wchar_t* const RT_MODES[3] = {L"OFF", L"SHADOWS", L"SHADOWS + AO"};
@@ -483,7 +497,7 @@ std::vector<Frontend::Item> Frontend::items() const {
                  L"Louder rear speakers, as the cabinet's seat speakers"},
                 {OPT_SAMPLES, L"SAMPLE QUALITY", settings.cubic_samples ? L"SMOOTH" : L"ORIGINAL",
                  L"Smooth interpolation of the instrument and voice samples, or the original chip's"},
-                {OPT_AA, L"ANTI-ALIASING", AA[settings.aa], aa_hint},
+                {OPT_AA, L"ANTI-ALIASING", AA[std::clamp(settings.aa, 0, 6)], aa_hint},
                 {OPT_HAZE, L"DISTANCE HAZE", on_off(settings.haze),
                  L"Far scenery fades into the sky instead of appearing suddenly"},
                 {OPT_BLOOM, L"BLOOM", BLOOM_LEVELS[settings.bloom], L"Soft glow around the sun, lights and bright reflections"},
@@ -709,12 +723,12 @@ void Frontend::activate(const Item& it, int dir) {
     case OPT_SPEAKERS: settings.speakers = (settings.speakers + dir + 3) % 3; push(Action::SettingsChanged); break;
     case OPT_REAR: settings.rear_boost = (settings.rear_boost + 3 * dir + 15) % 15; push(Action::SettingsChanged); break;
     case OPT_SAMPLES: settings.cubic_samples = !settings.cubic_samples; push(Action::SettingsChanged); break;
-    case OPT_AA: {   // MSAA, DLAA, DLSS QUALITY, OFF
-        static const int ORDER[4] = {0, 1, 3, 2};
+    case OPT_AA: {   // OFF, MSAA, DLAA, DLSS QUALITY, BALANCED, PERFORMANCE, ULTRA PERFORMANCE
+        static const int ORDER[7] = {2, 0, 1, 3, 4, 5, 6};
         int at = 0;
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 7; i++)
             if (ORDER[i] == settings.aa) at = i;
-        settings.aa = ORDER[(at + dir + 4) % 4];
+        settings.aa = ORDER[(at + dir + 7) % 7];
         push(Action::SettingsChanged);
         break;
     }
@@ -1251,11 +1265,12 @@ std::vector<Frontend::RecordRow> Frontend::record_rows() const {
 // ---- RESTART NOW? ----
 
 std::wstring Frontend::restart_list() const {
-    static const wchar_t* const AA_NAMES[4] = {L"MSAA 4X", L"DLAA", L"OFF", L"DLSS QUALITY"};
+    static const wchar_t* const AA_NAMES[7] = {L"MSAA 4X", L"DLAA", L"OFF", L"DLSS QUALITY", L"DLSS BALANCED",
+                                               L"DLSS PERFORMANCE", L"DLSS ULTRA PERFORMANCE"};
     std::wstring list;
     if (settings.render_scale != scale_at_launch) list = L"RENDER SCALE " + std::to_wstring(settings.render_scale) + L"%";
     if (settings.aa != aa_at_launch)
-        list += (list.empty() ? L"" : L" and ") + std::wstring(L"ANTI-ALIASING ") + AA_NAMES[std::clamp(settings.aa, 0, 3)];
+        list += (list.empty() ? L"" : L" and ") + std::wstring(L"ANTI-ALIASING ") + AA_NAMES[std::clamp(settings.aa, 0, 6)];
     return list;
 }
 

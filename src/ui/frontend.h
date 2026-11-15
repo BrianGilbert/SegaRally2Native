@@ -37,7 +37,10 @@ struct FrontendSettings {
     int speakers = 0;  // 0 stereo, 1 surround 4.0, 2 headphones (AudioStream::Speakers)
     int rear_boost = 6;  // dB on the rear pair: 0, 3, 6, 9, 12
     bool cubic_samples = true;   // smooth (cubic) sample interpolation instead of the original linear one
-    int aa = 0;        // 0 MSAA, 1 DLAA, 2 off, 3 DLSS quality (takes effect on the next launch)
+    int aa = 0;        // 0 MSAA, 1 DLAA, 2 off, 3 DLSS QUALITY, 4 BALANCED, 5 PERFORMANCE, 6 ULTRA PERFORMANCE (next launch)
+    // settings.ini only (dlss_model = auto / k / m / l), for advanced users: the
+    // model DLAA and DLSS use. 0 AUTO (dlss::preset_for), 1 K, 2 M, 3 L
+    int dlss_model = 0;
     bool aa_saved = false;   // load() found it in the file (not there on the first run: chosen then for the GPU and the screen, app.cpp)
     bool haze = true;  // distance haze
     int bloom = 2;     // glow around bright things: 0 off, 1 low, 2 medium, 3 high

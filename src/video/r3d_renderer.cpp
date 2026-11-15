@@ -166,7 +166,7 @@ void R3DRenderer::transition(VkCommandBuffer cmd, Image& img, VkImageLayout to, 
     img.layout = to;
 }
 
-bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, bool dlaa, bool dlss_quality) {
+bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, bool dlaa, int dlss_mode, int dlss_model) {
     vk_ = &vk;
     dev_ = vk.device();
     supersample_ = std::clamp(supersample, 0.5f, 4.0f);
@@ -174,7 +174,17 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     // DLAA does the anti-aliasing itself from aliased single-sample input
     if (dlaa && dlaa_.init(vk.instance(), vk.gpu(), dev_)) {
         msaa = 1;
-        upscale_ = dlss_quality ? 1.5f : 1.0f;   // DLSS's quality setting: two thirds of the size each way
+        int mode = std::clamp(dlss_mode, 0, dlss::MODE_COUNT - 1);
+        upscale_ = dlss::MODE_SCALE[mode];   // QUALITY two thirds of the size each way ... ULTRA PERFORMANCE a third
+        jitter_phases_ = uint32_t(8.0f * upscale_ * upscale_ + 0.5f);
+        VkPhysicalDeviceProperties gpu;
+        vkGetPhysicalDeviceProperties(vk.gpu(), &gpu);
+        bool fp8 = dlss::has_fp8(gpu.deviceName);
+        dlss_preset_ = dlss::preset_for(mode, dlss_model, fp8);
+        dlaa_.configure(mode, dlss_preset_);
+        printf("[dlaa] mode %d (3D %.0f%% of the size), preset %c (%s, FP8 %s), %u jitter phases\n", mode,
+               100.0f / upscale_, char('A' + dlss_preset_ - 1), dlss_model ? "chosen" : "auto", fp8 ? "yes" : "no",
+               jitter_phases_);
     }
     // Highest supported MSAA level not above the requested one
     VkPhysicalDeviceProperties props;
@@ -2129,8 +2139,8 @@ void R3DRenderer::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D ext
     drawn_serial_ = scene_serial_;
     drawn_interp_ = interp_;
     // DLAA: the image is shifted by a different sub-pixel amount each frame
-    // (Halton 2,3 over 8 phases; 18 when DLSS upscales: 8 for each pixel it
-    // makes) so it can gather detail between pixels
+    // (Halton 2,3 over 8 phases; when DLSS upscales 8 for each pixel it makes:
+    // jitter_phases_) so it can gather detail between pixels
     float jitter_x = 0, jitter_y = 0, alpha_seed = 0;
     if (dlaa_.ready()) {
         auto halton = [](uint32_t i, uint32_t base) {
@@ -2141,7 +2151,7 @@ void R3DRenderer::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D ext
             }
             return r;
         };
-        uint32_t phase = uint32_t(jitter_index_++ % (upscale_ > 1.0f ? 18 : 8)) + 1;
+        uint32_t phase = uint32_t(jitter_index_++ % jitter_phases_) + 1;
         jitter_x = halton(phase, 2) - 0.5f;
         jitter_y = halton(phase, 3) - 0.5f;
         // Alpha-tested edges (foliage): noise threshold that changes every frame
