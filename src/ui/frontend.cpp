@@ -2822,7 +2822,7 @@ void Frontend::draw_wheel_prompt() {
         {   // the devices found, or what the setup set: in two columns, smaller, when one does not hold them
             int room = std::max(1, (y1 - foot_h - U(10) - ty) / U(32));
             bool two = int(p.lines.size()) > room;
-            int lh = two ? U(28) : U(32), lpx = two ? U(19) : U(22), per = two ? std::max(1, (y1 - foot_h - U(10) - ty) / lh) : room;
+            int lh = two ? U(28) : U(32), lpx = two ? U(19) : U(22), per = two ? std::max(1, std::min((y1 - foot_h - U(10) - ty) / lh, (int(p.lines.size()) + 1) / 2)) : room;   // halves
             int colw = two ? (tw - U(24)) / 2 : tw;
             for (size_t i = 0; i < p.lines.size() && int(i) < per * (two ? 2 : 1); i++) {
                 int lx = tx + (int(i) >= per ? colw + U(24) : 0), ly = ty + (int(i) % per) * lh;

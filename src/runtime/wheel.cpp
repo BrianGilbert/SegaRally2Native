@@ -906,7 +906,7 @@ void enter_step(int step) {
     bool force_ok = g_wheel.joy && g_wheel.haptic && g_wheel.constant >= 0;
     if (step == ST_ROTATION && !(g_src[STEER] && g_src[STEER]->joy)) step++;   // no steering to measure
     if (step == ST_FORCE && !force_ok) {
-        g_p.summary.push_back(g_wheel.joy ? "FORCE FEEDBACK: NOT AVAILABLE ON THIS WHEEL" : "FORCE FEEDBACK: NO WHEEL TO TEST");
+        g_p.summary.push_back(g_wheel.joy ? "FORCE FEEDBACK: NONE" : "FORCE FEEDBACK: NO WHEEL");
         step = ST_DONE;
     }
     g_p.step = step;
@@ -1261,7 +1261,7 @@ void wheel_prompt_choose(int choice) {
                                  : "NO FORCE FELT";
         g_p.note = choice == 2 ? "Check GAIN, and that no other program (the wheel's own software, SimHub...) holds the wheel"
                                : "";
-        g_p.summary.push_back("FORCE FEEDBACK: " + g_p.done);
+        g_p.summary.push_back(choice == 0 ? "FORCE FEEDBACK: OK" : choice == 1 ? "FORCE FEEDBACK: INVERTED" : "FORCE FEEDBACK: NOT FELT");
         g_p.done_at = now_s();
         force_test_off();
         g_p.push_from = -1;   // (on to ST_DONE after the message)
