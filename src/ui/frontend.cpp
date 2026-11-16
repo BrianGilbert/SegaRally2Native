@@ -2129,8 +2129,12 @@ void Frontend::shade_backdrop() {
     hgrad(int(w_ * 0.66f), 0, w_, h_, 0x02040A, 0.0f, 0.5f);
     vgrad(0, int(h_ * 0.72f), w_, h_, 0x000000, 0.0f, 0.6f);
     if (logo_.w > 0) {
+        // LOGO_H high, but no wider than the column it is centred on: a wide
+        // logo is set smaller, in the middle of the same band
         int lh = int(LOGO_H * h_), lw = lh * logo_.w / logo_.h;
-        sprite(logo_, int(w_ - LOGO_FROM_RIGHT * u_) - lw / 2, int(LOGO_TOP * h_), lw, lh);
+        const int max_w = int(2 * (LOGO_FROM_RIGHT - 40) * u_);
+        if (lw > max_w) { lw = max_w; lh = lw * logo_.h / logo_.w; }
+        sprite(logo_, int(w_ - LOGO_FROM_RIGHT * u_) - lw / 2, int(LOGO_TOP * h_) + (int(LOGO_H * h_) - lh) / 2, lw, lh);
     } else {   // no logo picture yet: the title in letters, where the logo goes
         auto U = [&](float v) { return int(v * u_ + 0.5f); };
         int cx = int(w_ - LOGO_FROM_RIGHT * u_), top = int(LOGO_TOP * h_) + U(40);
