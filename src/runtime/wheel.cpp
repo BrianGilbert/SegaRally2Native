@@ -666,6 +666,8 @@ struct Listen {
     double since = 0;
     std::vector<Snap> snaps;
 } g_listen;
+int g_none_row = -1;          // a row chosen with nothing to listen to: says so for a moment
+double g_none_until = 0;
 
 double now_s() { return double(SDL_GetTicksNS()) * 1e-9; }
 
@@ -753,7 +755,10 @@ std::vector<WheelRow> wheel_rows() {
         WheelRow row;
         row.label = ROWS[r].label;
         int k = ROWS[r].ctl;
-        if (r == g_listen.row) {
+        if (r == g_none_row && now_s() < g_none_until) {
+            row.value = "NO WHEEL FOUND";
+            row.hint = "No wheel, pedals or other joystick found (gamepads are set apart). Plug it in and choose this again";
+        } else if (r == g_listen.row) {
             row.value = k == STEER ? "TURN IT RIGHT..." : k == GAS || k == BRAKE ? "PRESS IT..." : "MOVE IT...";
             row.hint = k == STEER ? "Turn the wheel to the right now (Esc cancels)"
                        : k == HANDBRAKE ? "Pull the hand brake or press its button now (Esc cancels)"
@@ -772,16 +777,17 @@ std::vector<WheelRow> wheel_rows() {
             int n = c.ctl[use];
             bool is_axis = use == STEER || use == GAS || use == BRAKE || use == HANDBRAKE_AXIS;
             const Wheel* src = g_src[use];
-            std::string where = src == &g_wheel && g_wheel.joy ? g_state.name
-                                : src && src->joy ? src->label
-                                : ctl_device(c, use).empty() ? std::string("the wheel")
+            bool found = src && src->joy;
+            std::string where = src == &g_wheel && found ? g_state.name
+                                : found ? src->label
+                                : ctl_device(c, use).empty() ? std::string("The wheel (not plugged in)")
                                                              : ctl_device(c, use) + " (not plugged in)";
             if (n < 0) {
                 row.value = "NONE";
                 row.hint = "Not set. Choose it and move the control to set it";
             } else {
                 std::string what = (is_axis ? "AXIS " : "BUTTON ") + std::to_string(n);
-                std::string dev = src == &g_wheel ? "WHEEL" : upper(where);
+                std::string dev = !found ? "NOT FOUND" : src == &g_wheel ? "WHEEL" : upper(where);
                 if (dev.size() > 12) dev = dev.substr(0, 11) + ".";
                 row.value = what + " - " + dev;
                 row.hint = where + ", " + (is_axis ? "axis " : "button ") + std::to_string(n) +
@@ -828,6 +834,11 @@ void wheel_row_input(int r, int dir) {
     }
     SDL_free(ids);
     printf("[wheel] %s: listening to %d devices\n", ROWS[r].label, int(g_listen.snaps.size()));
+    if (g_listen.snaps.empty()) {   // nothing to wait for
+        end_listen();
+        g_none_row = r;
+        g_none_until = now_s() + 3.0;
+    }
 }
 
 void wheels_poll(bool focused, bool menu, std::vector<PadKey>& keys) {
