@@ -1995,6 +1995,8 @@ std::vector<std::wstring> Frontend::wrap(Family f, int px, const std::wstring& s
 // The logo, LOGO_H of the window high from LOGO_TOP, centred LOGO_FROM_RIGHT
 // (1080p pixels) from the right edge: above the menu's column
 constexpr float LOGO_TOP = 0.09f, LOGO_H = 0.28f, LOGO_FROM_RIGHT = 420;   // the logo and the entries as one block
+constexpr float LOGO_PICTURE_X = 350;   // logo.png's centre from the right edge (as Lost World's)
+constexpr float LOGO_W = 400;           // logo.png at most this wide (layout units), the tagline under it
 
 // A picture blurred: averaged down by 16 in each direction and smoothed a
 // few times (stretched back up by whoever draws it)
@@ -2129,12 +2131,30 @@ void Frontend::shade_backdrop() {
     hgrad(int(w_ * 0.66f), 0, w_, h_, 0x02040A, 0.0f, 0.5f);
     vgrad(0, int(h_ * 0.72f), w_, h_, 0x000000, 0.0f, 0.6f);
     if (logo_.w > 0) {
-        // LOGO_H high, but no wider than the column it is centred on: a wide
-        // logo is set smaller, in the middle of the same band
-        int lh = int(LOGO_H * h_), lw = lh * logo_.w / logo_.h;
-        const int max_w = int(2 * (LOGO_FROM_RIGHT - 40) * u_);
-        if (lw > max_w) { lw = max_w; lh = lw * logo_.h / logo_.w; }
-        sprite(logo_, int(w_ - LOGO_FROM_RIGHT * u_) - lw / 2, int(LOGO_TOP * h_) + (int(LOGO_H * h_) - lh) / 2, lw, lh);
+        // The logo picture, LOGO_W wide at most, and under it a thin amber
+        // rule and what this is, in three lines of amber typewriter capitals;
+        // all of it centred in the logo's band (Lost World's 'plate')
+        auto U = [&](float v) { return int(v * u_ + 0.5f); };
+        static const wchar_t* const TAGLINE[] = {L"AN UNOFFICIAL, FAN-MADE RECOMPILATION", L"OF THE 1998 ARCADE GAME",
+                                                 L"SEGA RALLY 2"};
+        constexpr uint32_t RULE = 0xFFA032, TAG_TEXT = 0xF0C890;   // Lost World's amber
+        const int lines = int(std::size(TAGLINE));
+        const int tag_px = U(20), tag_line = U(28), gap = U(14), rule_gap = U(14);
+        const int below = gap + rule_gap + lines * tag_line;
+        const int band0 = int(LOGO_TOP * h_), band1 = int((LOGO_TOP + LOGO_H) * h_);
+        int lw = U(LOGO_W), lh = lw * logo_.h / logo_.w;
+        const int max_h = band1 - band0 - below;   // a tall logo: as high as fits
+        if (lh > max_h && max_h > 0) lh = max_h, lw = lh * logo_.w / logo_.h;
+        const int cx = int(w_ - LOGO_PICTURE_X * u_);
+        int top = band0 + std::max(0, (band1 - band0 - (lh + below)) / 2);
+        sprite(logo_, cx - lw / 2, top, lw, lh);
+        int ty = top + lh + gap, rule_w = U(330);
+        fill(cx - rule_w / 2, ty, cx + rule_w / 2, ty + std::max(1, U(1.5f)), RULE, 0.7f);
+        ty += rule_gap;
+        for (const wchar_t* line : TAGLINE) {
+            text(MONO, tag_px, line, cx, ty, 1, {TAG_TEXT, TAG_TEXT, 0, 0, 1, std::max(1, U(2))});
+            ty += tag_line;
+        }
     } else {   // no logo picture yet: the title in letters, where the logo goes
         auto U = [&](float v) { return int(v * u_ + 0.5f); };
         int cx = int(w_ - LOGO_FROM_RIGHT * u_), top = int(LOGO_TOP * h_) + U(40);
