@@ -108,7 +108,7 @@ public:
     enum class Screen { None, Splash, Main, Options, Pause, Records, Debug, Play };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
                         QuitToMenu, StartDebug, DisplayChanged, Restart,
-                        WheelRow, WheelCancel };   // WheelRow: WHEEL tab row wheel_row, with wheel_dir   // Restart: RESTART NOW   // DisplayChanged: MODE / RESOLUTION to the window
+                        WheelRow, WheelCancel, WheelChoose, WheelClear };   // WheelRow: WHEEL tab row wheel_row, with wheel_dir   // Restart: RESTART NOW   // DisplayChanged: MODE / RESOLUTION to the window
 
     bool init(const std::string& font_dir);
     void shutdown();
@@ -154,10 +154,25 @@ public:
     struct WheelLine {
         std::wstring group, label, value, hint;   // group: its heading (CONTROLS, FORCE FEEDBACK, ADVANCED)
         float fill = -1;                          // a setting's bar 0..1, -1 none
+        int meter = 0;                            // what `live` is: 0 none, 1 steering -1..1, 2 pedal 0..1, 3 button
+        float live = 0;                           // (not compared: app.cpp redraws for it on the WHEEL tab only)
         bool operator==(const WheelLine& o) const {
-            return group == o.group && label == o.label && value == o.value && hint == o.hint && fill == o.fill;
+            return group == o.group && label == o.label && value == o.value && hint == o.hint && fill == o.fill &&
+                   meter == o.meter;
         }
     };
+    // A control listening, or WHEEL SETUP: a window over the WHEEL tab (wheel.h's
+    // WheelPrompt); Left / Right pick one of its choices, Enter gives WheelChoose
+    // with wheel_choice, Esc / BACK WheelCancel
+    struct WheelPromptView {
+        bool on = false;
+        int icon = 0;   // WheelPrompt::Icon
+        std::wstring kicker, title, action, hint, glyph, moving, done, note;
+        int gear = 0, step = 0, steps = 0;
+        float progress = 0, time_left = -1, done_age = -1;
+        std::vector<std::wstring> lines, choices;
+    } wheel_prompt;
+    int wheel_choice = 0;
     std::vector<WheelLine> wheel_lines;
     struct WheelLive {   // the wheel and pedals now, drawn in the WHEEL tab's panel
         bool on = false;
@@ -434,6 +449,14 @@ private:
     // The settings page (Options, also from the pause menu): the sections in a
     // column at the left, the open one's options in groups in the middle, what
     // the chosen one does in a panel at the right, the key help at the bottom
+    void draw_wheel_prompt();   // the window over the WHEEL tab
+    std::vector<RECT> prompt_choices_;   // its choices, for the pointer
+    // Smooth shapes (WHEEL tab): a ring or disc (r0 < 0), a thick line, an arc
+    // (angles in radians, 0 up, clockwise), and a steering wheel turned by deg
+    void aa_ring(float cx, float cy, float r0, float r1, uint32_t rgb, float alpha);
+    void aa_line(float ax, float ay, float bx, float by, float half, uint32_t rgb, float alpha);
+    void aa_arc(float cx, float cy, float r, float half, float a0, float a1, uint32_t rgb, float alpha);
+    void draw_wheel_icon(float cx, float cy, float r, float deg, float dim);
     const std::wstring& wheel_group(int i) const;   // WHEEL tab: wheel_lines[i]'s heading, fill
     float wheel_fill(int i) const;
     int draw_wheel_live(int x, int inner, int y_bottom);   // its panel's drawing; returns its top

@@ -61,6 +61,7 @@ struct Config {
     float ffb_strength = 0.7f;    // the game's motor force
     float ffb_spring = 0.25f;     // centring spring (0 = none)
     bool ffb_invert = false;
+    bool setup_done = false;      // WHEEL SETUP finished once
     Config() {
         for (int c = 0; c < CTL_COUNT; c++) ctl[c] = CTL[c].def;
     }
@@ -115,7 +116,7 @@ void write_ini(const Config& c) {
             "; driver use about 0.3; set it to 270 in the driver and leave 1.0.\n",
             c.device.c_str(), c.pedals_device.c_str(), c.shifter_device.c_str(), c.handbrake_device.c_str());
     line(STEER);
-    fprintf(f, "steer_range = %.2f\nsteer_invert = %d\nsteer_dead = %.2f\n\n", c.steer_range, c.steer_invert, c.steer_dead);
+    fprintf(f, "steer_range = %.3f\nsteer_invert = %d\nsteer_dead = %.2f\n\n", c.steer_range, c.steer_invert, c.steer_dead);
     fprintf(f,
             "; Pedals: one axis each, or combined_pedals = 1 for one axis (accelerator one way,\n"
             "; brake the other: combined_gas_negative = 1 when the accelerator moves it below\n"
@@ -144,8 +145,9 @@ void write_ini(const Config& c) {
     fprintf(f,
             "\n; Force feedback (0..1): the game's own force (bumps, slides, the road) and a\n"
             "; centring spring. ffb_invert = 1 if the wheel pulls the wrong way.\n"
-            "ffb_strength = %.2f\nffb_spring = %.2f\nffb_invert = %d\n",
-            c.ffb_strength, c.ffb_spring, c.ffb_invert);
+            "ffb_strength = %.2f\nffb_spring = %.2f\nffb_invert = %d\n"
+            "\n; OPTIONS > WHEEL > WHEEL SETUP was finished once\nsetup_done = %d\n",
+            c.ffb_strength, c.ffb_spring, c.ffb_invert, c.setup_done);
     fclose(f);
 }
 
@@ -202,6 +204,7 @@ Config read_ini(bool create = true) {
         else if (k == "ffb_strength") c.ffb_strength = std::clamp(v, 0.0f, 1.0f);
         else if (k == "ffb_spring") c.ffb_spring = std::clamp(v, 0.0f, 1.0f);
         else if (k == "ffb_invert") c.ffb_invert = i != 0;
+        else if (k == "setup_done") c.setup_done = i != 0;
     }
     fclose(f);
     return c;
@@ -239,6 +242,14 @@ WheelLive g_live;             // wheel_live()
 WheelState g_state;
 std::atomic<float> g_force{0}, g_shake{0};   // from the game thread (runtime.cpp ffb_frame)
 bool g_focused = false;
+// WHEEL SETUP's force test: a push as the game would give it (+ to the right), instead of the game's
+bool g_testing = false;
+float g_test_force = 0;
+// The force sent while driving: the last drive's and this one's (GAIN's hint)
+struct FfbStats {
+    double frames = 0, clipped = 0;
+    float peak = 0;
+} g_ffb_last, g_ffb_now;
 const bool g_log = getenv("SR2_WHEEL_LOG") != nullptr;
 
 // A joystick that is a wheel, or anything with axes that SDL cannot use as a
@@ -391,7 +402,14 @@ void restart_haptics(Wheel& w) {
 }
 
 void apply_force(Wheel& w) {
-    float f = g_focused ? g_force.load() * g_cfg.ffb_strength * (g_cfg.ffb_invert ? -1.0f : 1.0f) : 0.0f;
+    float f = g_testing ? -g_test_force   // (the game's sign: runtime.cpp gives the wheel -force)
+              : g_focused ? g_force.load() * g_cfg.ffb_strength : 0.0f;
+    if (g_focused && !g_testing && std::fabs(g_force.load()) > 0.01f) {   // the game pushing: how hard
+        g_ffb_now.frames++;
+        g_ffb_now.clipped += std::fabs(f) >= 0.98f;
+        g_ffb_now.peak = std::max(g_ffb_now.peak, std::fabs(f));
+    }
+    if (g_cfg.ffb_invert) f = -f;
     bool restart = false;
     if (w.haptic && w.constant >= 0) {
         int16_t level = int16_t(std::clamp(f, -1.0f, 1.0f) * 32767.0f);
@@ -418,7 +436,7 @@ void apply_force(Wheel& w) {
     if (w.haptic && (w.constant >= 0 || w.spring >= 0)) {
         static Uint64 next_restart = 0;
         Uint64 now = SDL_GetTicksNS();
-        if (g_focused && now >= next_restart) restart = true;
+        if ((g_focused || g_testing) && now >= next_restart) restart = true;
         if (restart) {
             restart_haptics(w);
             g_vibration_seconds += double(SDL_GetTicksNS() - now) * 1e-9;
@@ -437,13 +455,24 @@ void apply_force(Wheel& w) {
 // Tests without a wheel: SR2_FAKE_WHEEL=steer,gas,brake,hand[,at] plugs in an
 // SDL virtual wheel (axis 0 steering, 1 accelerator, 2 brake, button 1 hand
 // brake, as wheel.ini's defaults), pedals at rest, that goes to those values
-// (steering -1..1 of its axis, the rest 0..1) `at` seconds after the start (1)
+// (steering -1..1 of its axis, the rest 0..1) `at` seconds after the start (1).
+// SR2_FAKE_SCRIPT="2.5 a0 0.25; 4 a1 1; 4.5 a1 -1; 6 b4 1; 6.2 b4 0" then moves it
+// on: at those seconds after it is plugged in, axis N to a raw -1..1, button N
+// down (1) or up (0), to go through WHEEL SETUP
 struct Fake {
     SDL_JoystickID id = 0;
     SDL_Joystick* joy = nullptr;
     float v[4] = {};
     double at = 1.0, from = 0;
     bool moved = false;
+    struct Event {
+        double t;
+        bool button;
+        int n;
+        float v;
+    };
+    std::vector<Event> script;
+    size_t next = 0;
 } g_fake;
 
 void fake_init() {
@@ -464,6 +493,19 @@ void fake_init() {
         printf("[wheel] SR2_FAKE_WHEEL: no virtual wheel (%s)\n", SDL_GetError());
         return;
     }
+    if (const char* sc = std::getenv("SR2_FAKE_SCRIPT")) {
+        for (const char* p = sc; *p;) {
+            double t;
+            char kind;
+            int n, used = 0;
+            float v;
+            if (std::sscanf(p, " %lf %c%d %f%n", &t, &kind, &n, &v, &used) != 4 || used <= 0) break;
+            f.script.push_back({t, kind == 'b', n, v});
+            p += used;
+            while (*p == ' ' || *p == ';') p++;
+        }
+        printf("[wheel] SR2_FAKE_SCRIPT: %d moves\n", int(f.script.size()));
+    }
     SDL_SetJoystickVirtualAxis(f.joy, 1, -32768);   // the pedals let go
     SDL_SetJoystickVirtualAxis(f.joy, 2, -32768);
     f.from = double(SDL_GetTicksNS()) * 1e-9;
@@ -472,7 +514,15 @@ void fake_init() {
 
 void fake_poll() {
     Fake& f = g_fake;
-    if (!f.joy || f.moved || double(SDL_GetTicksNS()) * 1e-9 - f.from < f.at) return;
+    if (!f.joy) return;
+    double t = double(SDL_GetTicksNS()) * 1e-9 - f.from;
+    for (; f.next < f.script.size() && t >= f.script[f.next].t; f.next++) {
+        const Fake::Event& e = f.script[f.next];
+        if (e.button) SDL_SetJoystickVirtualButton(f.joy, e.n, e.v >= 0.5f);
+        else SDL_SetJoystickVirtualAxis(f.joy, e.n, int16_t(std::clamp(e.v, -1.0f, 1.0f) * 32767.0f));
+        printf("[wheel] SR2_FAKE_SCRIPT %.1f s: %s %d = %.2f\n", t, e.button ? "button" : "axis", e.n, e.v);
+    }
+    if (f.moved || t < f.at) return;
     f.moved = true;
     auto pedal_raw = [](float t) { return int16_t(std::clamp(-32768.0f + std::clamp(t, 0.0f, 1.0f) * 65535.0f, -32768.0f, 32767.0f)); };
     SDL_SetJoystickVirtualAxis(f.joy, 0, int16_t(std::clamp(f.v[0], -1.0f, 1.0f) * 32767.0f));
@@ -694,21 +744,23 @@ static void reopen_all() {
     resolve();
 }
 
-// ---- OPTIONS > WHEEL: a control set by moving it ----
+// ---- OPTIONS > WHEEL: a control set by moving it, and WHEEL SETUP ----
 
 namespace {
 
 // The settings after the controls (Row::ctl below 0)
-enum { SET_GAIN = -1, SET_SPRING = -2, SET_INVERT = -3, SET_ROTATION = -4, SET_DEAD = -5 };
+enum { SET_GAIN = -1, SET_SPRING = -2, SET_INVERT = -3, SET_ROTATION = -4, SET_DEAD = -5, SET_SETUP = -6 };
 struct Row {
     const char* group;
     const char* label;
     int ctl;   // a control, or a SET_ setting
 };
+constexpr const char* SETUP = "SETUP";
 constexpr const char* CONTROLS = "CONTROLS";
 constexpr const char* FFB = "FORCE FEEDBACK";
 constexpr const char* ADVANCED = "ADVANCED";
-const Row ROWS[] = {{CONTROLS, "STEERING", STEER},      {CONTROLS, "ACCELERATOR", GAS},   {CONTROLS, "BRAKE", BRAKE},
+const Row ROWS[] = {{SETUP, "WHEEL SETUP", SET_SETUP},
+                    {CONTROLS, "STEERING", STEER},      {CONTROLS, "ACCELERATOR", GAS},   {CONTROLS, "BRAKE", BRAKE},
                     {CONTROLS, "HAND BRAKE", HANDBRAKE}, {CONTROLS, "SHIFT UP", SHIFT_UP}, {CONTROLS, "SHIFT DOWN", SHIFT_DOWN},
                     {CONTROLS, "GEAR 1", GEAR1},         {CONTROLS, "GEAR 2", GEAR2},      {CONTROLS, "GEAR 3", GEAR3},
                     {CONTROLS, "GEAR 4", GEAR4},         {CONTROLS, "VIEW CHANGE", VIEW},  {CONTROLS, "START", START},
@@ -716,10 +768,29 @@ const Row ROWS[] = {{CONTROLS, "STEERING", STEER},      {CONTROLS, "ACCELERATOR"
                     {ADVANCED, "WHEEL ROTATION", SET_ROTATION}, {ADVANCED, "STEERING DEAD ZONE", SET_DEAD}};
 constexpr int ROW_COUNT = int(sizeof ROWS / sizeof ROWS[0]);
 constexpr int MAX_DEAD = 20;   // STEERING DEAD ZONE: up to 20 %
-constexpr double SETTLE = 0.4, LISTEN_FOR = 10.0;
+// Listening: devices just opened settle first; one control's row gives up after a
+// while (WHEEL SETUP waits: each step can be skipped); a control taken is shown a moment
+constexpr double SETTLE = 0.4, LISTEN_FOR = 10.0, SHOW_DONE = 1.1;
+constexpr double HOLD_FOR = 1.5;                  // WHEEL ROTATION: held still this long
+constexpr double HANDS_OFF = 2.0, PUSH_FOR = 0.7;  // the force test: time to let go, then the push
+constexpr float PUSH = 0.45f;                     // its strength (of the wheel's most)
 
-// While a row listens: every joystick open (the ones not in use only for
-// this), and what each one read when it started
+bool is_axis_ctl(int k) { return k == STEER || k == GAS || k == BRAKE || k == HANDBRAKE_AXIS; }
+
+const char* ctl_label(int k) {
+    if (k == HANDBRAKE_AXIS) k = HANDBRAKE;
+    for (const Row& r : ROWS)
+        if (r.ctl == k) return r.label;
+    return CTL[k].key;
+}
+
+std::string upper(std::string s) {
+    for (char& c : s) c = char(std::toupper((unsigned char)c));
+    return s;
+}
+
+// While listening: every joystick open (the ones not in use only for this),
+// and what each one read when it started
 struct Snap {
     SDL_Joystick* joy;
     uint32_t id;
@@ -727,11 +798,33 @@ struct Snap {
     bool button[MAX_BUTTONS];
     int axes, buttons;
 };
-struct Listen {
-    int row = -1;
-    double since = 0;
+
+// WHEEL SETUP's steps, in order (the gears skipped together)
+enum Step { ST_INTRO, ST_STEER, ST_ROTATION, ST_GAS, ST_BRAKE, ST_HANDBRAKE, ST_SHIFT_UP, ST_SHIFT_DOWN,
+            ST_GEAR1, ST_GEAR2, ST_GEAR3, ST_GEAR4, ST_VIEW, ST_FORCE, ST_FORCE_ASK, ST_DONE, ST_COUNT };
+const int STEP_CTL[ST_COUNT] = {-1, STEER, -1, GAS, BRAKE, HANDBRAKE, SHIFT_UP, SHIFT_DOWN,
+                                GEAR1, GEAR2, GEAR3, GEAR4, VIEW, -1, -1, -1};
+const int STAGE[ST_COUNT] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 8, 8, 9, 10, 10, 0};   // "STEP n OF 10"
+constexpr int STAGES = 10;
+
+// The window over the WHEEL tab: one control listening, or WHEEL SETUP
+struct Prompt {
+    bool on = false;
+    bool setup = false;
+    int step = ST_INTRO;
+    int ctl = -1;             // the control listened for now (-1: none)
+    double since = 0;         // when it started listening, or this step began
     std::vector<Snap> snaps;
-} g_listen;
+    float progress = 0;       // what moves most, towards being taken (or the hold)
+    std::string moving;
+    double done_at = -1;      // a control just taken: shown until done_at + SHOW_DONE
+    std::string done, note;
+    float hold = 0;           // ST_ROTATION: the turn held, since hold_since
+    double hold_since = -1;
+    double push_from = -1;    // ST_FORCE: when the push starts
+    std::vector<std::string> summary;   // WHEEL SETUP: what it set
+    int done_ctl = -1;        // one control's window: that control
+} g_p;
 int g_none_row = -1;          // a row chosen with nothing to listen to: says so for a moment
 double g_none_until = 0;
 
@@ -742,16 +835,124 @@ void take_snap(Snap& s) {
     for (int b = 0; b < s.buttons; b++) s.button[b] = SDL_GetJoystickButton(s.joy, b);
 }
 
-void end_listen() {
-    for (Snap& s : g_listen.snaps) SDL_CloseJoystick(s.joy);   // SDL counts the opens: ours only
-    g_listen = Listen{};
+void close_snaps() {
+    for (Snap& s : g_p.snaps) SDL_CloseJoystick(s.joy);   // SDL counts the opens: ours only
+    g_p.snaps.clear();
 }
 
-// The control moved: in the settings, then wheel.ini, then every device taken again
-void bind_control(int k, uint32_t id, bool is_axis, int index, int16_t from, int16_t to) {
+// Every joystick that is not a gamepad (a wheel SDL maps as one is kept)
+int open_snaps() {
+    close_snaps();
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetJoysticks(&count);
+    for (int i = 0; ids && i < count; i++) {
+        if (SDL_IsGamepad(ids[i]) && SDL_GetJoystickTypeForID(ids[i]) != SDL_JOYSTICK_TYPE_WHEEL) continue;
+        SDL_Joystick* j = SDL_OpenJoystick(ids[i]);
+        if (!j) continue;
+        Snap s{};
+        s.joy = j;
+        s.id = ids[i];
+        s.axes = std::min(SDL_GetNumJoystickAxes(j), 16);
+        s.buttons = std::clamp(SDL_GetNumJoystickButtons(j), 0, MAX_BUTTONS);
+        take_snap(s);
+        g_p.snaps.push_back(s);
+    }
+    SDL_free(ids);
+    return int(g_p.snaps.size());
+}
+
+// The force test's push off, the centring spring as it was
+void force_test_off() {
+    if (!g_testing) return;
+    g_testing = false;
+    g_test_force = 0;
+    make_spring(g_wheel);
+}
+
+void end_prompt() {
+    close_snaps();
+    force_test_off();
+    g_p = Prompt{};
+}
+
+void start_listen(int k) {
+    int n = open_snaps();
+    g_p.ctl = k;
+    g_p.since = now_s();
+    g_p.progress = 0;
+    g_p.moving.clear();
+    printf("[wheel] %s: listening to %d devices\n", ctl_label(k), n);
+}
+
+void enter_step(int step);
+
+void next_step() {
+    if (!g_p.setup) {
+        end_prompt();
+        return;
+    }
+    enter_step(g_p.step + 1);
+}
+
+void enter_step(int step) {
+    close_snaps();
+    g_p.ctl = -1;
+    g_p.done.clear();
+    g_p.note.clear();
+    g_p.done_at = -1;
+    g_p.progress = 0;
+    g_p.moving.clear();
+    g_p.since = now_s();
+    bool force_ok = g_wheel.joy && g_wheel.haptic && g_wheel.constant >= 0;
+    if (step == ST_ROTATION && !(g_src[STEER] && g_src[STEER]->joy)) step++;   // no steering to measure
+    if (step == ST_FORCE && !force_ok) {
+        g_p.summary.push_back(g_wheel.joy ? "FORCE FEEDBACK: the wheel gave the game no force effects"
+                                          : "FORCE FEEDBACK: no wheel to test");
+        step = ST_DONE;
+    }
+    g_p.step = step;
+    if (step < ST_COUNT && STEP_CTL[step] >= 0) start_listen(STEP_CTL[step]);
+    if (step == ST_ROTATION) g_p.hold_since = -1;
+    if (step == ST_FORCE) {   // the spring off, so the push turns the wheel
+        g_testing = true;
+        g_test_force = 0;
+        if (g_wheel.spring >= 0) {
+            SDL_DestroyHapticEffect(g_wheel.haptic, g_wheel.spring);
+            g_wheel.spring = -1;
+        }
+        restart_haptics(g_wheel);
+        g_p.push_from = now_s() + HANDS_OFF;
+    }
+    if (step == ST_DONE) {
+        force_test_off();
+        g_cfg.setup_done = true;
+        write_ini(g_cfg);
+        printf("[wheel] WHEEL SETUP done\n");
+    }
+}
+
+// A control moved: in the settings (another control that had it gets this
+// one's old binding: a swap), then wheel.ini, then every device taken again
+void take(int k, uint32_t id, bool is_axis, int index, int16_t from, int16_t to) {
     std::string name = device_name(id);
     bool on_wheel = g_wheel.joy && g_wheel.id == id;
     Config& c = g_cfg;
+    int target = k == HANDBRAKE && is_axis ? HANDBRAKE_AXIS : k;
+    int old_n = c.ctl[target];
+    std::string old_dev = c.dev[target];
+    std::string note;
+    if (k != STEER) {
+        for (const Row& r : ROWS) {   // the same axis or button on the same device, in another control
+            int j = r.ctl == HANDBRAKE && is_axis ? HANDBRAKE_AXIS : r.ctl;
+            if (j < 0 || j == target || is_axis_ctl(j) != is_axis || c.ctl[j] != index) continue;
+            const Wheel* src = g_src[j];
+            if (!src || !src->joy || src->id != id) continue;
+            c.ctl[j] = old_n;
+            c.dev[j] = old_dev;
+            note = std::string(ctl_label(j)) + " had it: now " +
+                   (old_n < 0 ? std::string("NONE") : (is_axis ? "AXIS " : "BUTTON ") + std::to_string(old_n));
+        }
+    }
     if (k == STEER) {
         c.device = name;
         c.ctl[STEER] = index;
@@ -759,7 +960,6 @@ void bind_control(int k, uint32_t id, bool is_axis, int index, int16_t from, int
     } else {
         // The wheel's own controls name no device unless their group's does
         bool plain = on_wheel && role_device(c, CTL[k].role).empty();
-        int target = k == HANDBRAKE && is_axis ? HANDBRAKE_AXIS : k;
         c.ctl[target] = index;
         c.dev[target] = plain ? std::string() : name;
         if (k == HANDBRAKE) c.ctl[is_axis ? HANDBRAKE : HANDBRAKE_AXIS] = -1;
@@ -769,49 +969,296 @@ void bind_control(int k, uint32_t id, bool is_axis, int index, int16_t from, int
         if (target == HANDBRAKE_AXIS) c.handbrake_rest = from;
     }
     write_ini(c);
-    printf("[wheel] %s: %s %d on %s\n", ROWS[g_listen.row].label, is_axis ? "axis" : "button", index, name.c_str());
-    end_listen();
+    printf("[wheel] %s: %s %d on %s\n", ctl_label(k), is_axis ? "axis" : "button", index, name.c_str());
+    std::string dev = on_wheel || k == STEER ? std::string("WHEEL") : upper(name);
+    if (dev.size() > 24) dev = dev.substr(0, 23) + ".";
+    g_p.done = (is_axis ? "AXIS " : "BUTTON ") + std::to_string(index) + "  -  " + dev;
+    g_p.note = note;
+    g_p.done_at = now_s();
+    g_p.summary.push_back(std::string(ctl_label(k)) + ": " + g_p.done);
+    close_snaps();
+    g_p.ctl = -1;
+    g_p.progress = 1;
     reopen_all();
 }
 
-// Looks for the control being moved, once the devices have settled
-void listen_poll() {
-    if (g_listen.row < 0) return;
-    double t = now_s() - g_listen.since;
-    if (t > LISTEN_FOR) {
-        printf("[wheel] nothing moved: %s left as it was\n", ROWS[g_listen.row].label);
-        end_listen();
+// WHEEL ROTATION from a quarter turn: the axis reads r of its half travel at
+// 90 degrees, so the wheel turns 180 / r degrees in all; steer_range is the
+// part of it for the arcade's 135 degrees each side
+void take_rotation(float r) {
+    r = std::fabs(r);
+    int deg = int(std::lround(180.0f / std::max(r, 0.01f) / 10.0f)) * 10;
+    std::string note;
+    if (deg < 270) {
+        note = "Under 270 degrees: the game needs at least the arcade's 270. Set more in your wheel's software";
+        deg = 270;
+    }
+    deg = std::min(deg, 3600);
+    g_cfg.steer_range = std::clamp(270.0f / float(deg), 0.05f, 1.0f);
+    write_ini(g_cfg);
+    printf("[wheel] WHEEL ROTATION: %d degrees (a quarter turn read %.3f of the axis)\n", deg, r);
+    g_p.done = std::to_string(deg) + "\xB0 WHEEL ROTATION";
+    g_p.note = note;
+    g_p.done_at = now_s();
+    g_p.summary.push_back("WHEEL ROTATION: " + std::to_string(deg) + "\xB0");
+    g_p.progress = 1;
+}
+
+float steer_raw() {   // the steering axis -1..1, turned right as +
+    const Wheel* w = g_src[STEER];
+    if (!w || !w->joy) return 0;
+    float r = axis(*w, g_cfg.ctl[STEER]) / 32767.0f;
+    return g_cfg.steer_invert ? -r : r;
+}
+
+// Each poll while the window is up
+void prompt_poll() {
+    if (!g_p.on) return;
+    double now = now_s();
+    if (g_p.done_at >= 0) {   // a control just taken, shown: then on
+        if (now >= g_p.done_at + SHOW_DONE) next_step();
         return;
     }
-    if (t < SETTLE) {   // freshly opened devices can read 0 at first
-        for (Snap& s : g_listen.snaps) take_snap(s);
+    if (g_p.ctl >= 0) {
+        double t = now - g_p.since;
+        if (!g_p.setup && t > LISTEN_FOR) {
+            printf("[wheel] nothing moved: %s left as it was\n", ctl_label(g_p.ctl));
+            end_prompt();
+            return;
+        }
+        if (t < SETTLE) {   // freshly opened devices can read 0 at first
+            for (Snap& s : g_p.snaps) take_snap(s);
+            return;
+        }
+        int k = g_p.ctl;
+        bool axes_ok = k == STEER || k == GAS || k == BRAKE || k == HANDBRAKE;
+        bool buttons_ok = k != STEER && k != GAS && k != BRAKE;
+        int need = k == STEER ? 6000 : 16000;   // a quarter turn right on a 900 degree wheel, or half a pedal
+        float best = 0;
+        std::string moving;
+        for (Snap& s : g_p.snaps) {
+            for (int b = 0; buttons_ok && b < s.buttons; b++)
+                if (SDL_GetJoystickButton(s.joy, b) && !s.button[b]) return take(k, s.id, false, b, 0, 0);
+            for (int a = 0; axes_ok && a < s.axes; a++) {
+                int16_t v = SDL_GetJoystickAxis(s.joy, a);
+                float f = float(std::abs(int(v) - int(s.axis[a]))) / float(need);
+                if (f >= 1.0f) return take(k, s.id, true, a, s.axis[a], v);
+                if (f > best) {
+                    best = f;
+                    moving = upper(device_name(s.id)) + "  -  AXIS " + std::to_string(a);
+                }
+            }
+        }
+        g_p.progress = best;
+        g_p.moving = best > 0.12f ? moving : std::string();
         return;
     }
-    int k = ROWS[g_listen.row].ctl;
-    bool axes_ok = k == STEER || k == GAS || k == BRAKE || k == HANDBRAKE;
-    bool buttons_ok = k != STEER && k != GAS && k != BRAKE;
-    int need = k == STEER ? 6000 : 16000;   // a quarter turn right on a 900 degree wheel, or half a pedal
-    for (Snap& s : g_listen.snaps) {
-        for (int b = 0; buttons_ok && b < s.buttons; b++)
-            if (SDL_GetJoystickButton(s.joy, b) && !s.button[b]) return bind_control(k, s.id, false, b, 0, 0);
-        for (int a = 0; axes_ok && a < s.axes; a++) {
-            int16_t v = SDL_GetJoystickAxis(s.joy, a);
-            if (std::abs(int(v) - int(s.axis[a])) >= need) return bind_control(k, s.id, true, a, s.axis[a], v);
+    if (g_p.step == ST_ROTATION) {   // held still, a fair way from the centre
+        float r = steer_raw();
+        if (std::fabs(r) < 0.04f || std::fabs(r - g_p.hold) > 0.006f) {
+            g_p.hold = r;
+            g_p.hold_since = now;
+            g_p.progress = 0;
+        } else {
+            g_p.progress = float((now - g_p.hold_since) / HOLD_FOR);
+            if (g_p.progress >= 1.0f) take_rotation(r);
+        }
+        return;
+    }
+    if (g_p.step == ST_FORCE && g_p.push_from > 0) {
+        if (now >= g_p.push_from + PUSH_FOR) {
+            g_test_force = 0;
+            g_p.push_from = -1;
+            g_p.step = ST_FORCE_ASK;
+        } else if (now >= g_p.push_from) {
+            g_test_force = PUSH;   // to the right, as the game would push it
         }
     }
 }
 
-std::string upper(std::string s) {
-    for (char& c : s) c = char(std::toupper((unsigned char)c));
-    return s;
+// The joysticks found (gamepads apart), for WHEEL SETUP's first step
+std::vector<std::string> found_devices() {
+    std::vector<std::string> out;
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetJoysticks(&count);
+    for (int i = 0; ids && i < count; i++) {
+        if (SDL_IsGamepad(ids[i]) && SDL_GetJoystickTypeForID(ids[i]) != SDL_JOYSTICK_TYPE_WHEEL) continue;
+        std::string n = device_name(ids[i]);
+        if (g_wheel.joy && g_wheel.id == ids[i])
+            n += g_wheel.haptic && g_wheel.constant >= 0 ? "  (the wheel, force feedback)" : "  (the wheel)";
+        out.push_back(n);
+    }
+    SDL_free(ids);
+    return out;
+}
+
+bool held_now(int k) {
+    const Wheel* d = g_src[k];
+    int b = g_cfg.ctl[k];
+    return d && d->joy && b >= 0 && b < d->buttons && d->down[b];
 }
 
 }  // namespace
 
-bool wheel_listening() { return g_listen.row >= 0; }
+bool wheel_listening() { return g_p.on; }
 
 void wheel_listen_cancel() {
-    if (g_listen.row >= 0) end_listen();
+    if (!g_p.on) return;
+    printf("[wheel] %s stopped\n", g_p.setup ? "WHEEL SETUP" : "listening");
+    end_prompt();
+}
+
+WheelPrompt wheel_prompt() {
+    WheelPrompt p;
+    if (!g_p.on) return p;
+    p.on = true;
+    double now = now_s();
+    int step = g_p.setup ? g_p.step : -1;
+    p.kicker = g_p.setup ? "WHEEL SETUP" : "SET CONTROL";
+    if (g_p.setup && STAGE[step] > 0) {
+        p.step = STAGE[step];
+        p.steps = STAGES;
+    }
+    p.progress = std::clamp(g_p.progress, 0.0f, 1.0f);
+    p.moving = g_p.moving;
+    p.done = g_p.done;
+    p.note = g_p.note;
+    p.done_age = g_p.done_at >= 0 ? float(now - g_p.done_at) : -1;
+    p.time_left = !g_p.setup && g_p.ctl >= 0 ? float(std::clamp(1.0 - (now - g_p.since) / LISTEN_FOR, 0.0, 1.0)) : -1;
+    int ctl = g_p.setup ? STEP_CTL[std::clamp(step, 0, ST_COUNT - 1)] : g_p.done_ctl;
+    p.title = ctl >= 0 ? ctl_label(ctl) : "";
+    switch (ctl) {
+    case STEER:
+        p.icon = WheelPrompt::TURN_RIGHT;
+        p.action = "TURN THE WHEEL TO THE RIGHT";
+        p.hint = "A quarter turn is enough. Every wheel, pedal set and shifter is listened to (gamepads apart)";
+        break;
+    case GAS:
+    case BRAKE:
+        p.icon = WheelPrompt::PEDAL;
+        p.glyph = ctl == GAS ? "GAS" : "BRAKE";
+        p.action = "PRESS THE PEDAL ALL THE WAY DOWN";
+        p.hint = "From rest, the other pedals let go. Its resting position is saved too";
+        break;
+    case HANDBRAKE:
+        p.icon = WheelPrompt::HAND_BRAKE;
+        p.action = "PULL THE HAND BRAKE";
+        p.hint = "An analog hand brake (on past half its travel) or a button";
+        break;
+    case SHIFT_UP:
+    case SHIFT_DOWN:
+        p.icon = WheelPrompt::BUTTON;
+        p.glyph = ctl == SHIFT_UP ? "+" : "-";
+        p.action = ctl == SHIFT_UP ? "PULL THE SHIFT UP PADDLE" : "PULL THE SHIFT DOWN PADDLE";
+        p.hint = "Or the button you want to use. They also change the settings section in the menus";
+        break;
+    case GEAR1:
+    case GEAR2:
+    case GEAR3:
+    case GEAR4:
+        p.icon = WheelPrompt::GEAR;
+        p.gear = ctl - GEAR1 + 1;
+        p.action = "PUT THE H SHIFTER IN GEAR " + std::to_string(p.gear);
+        p.hint = "Sega Rally 2 has four gears. The paddles still change gear while the stick stays put";
+        break;
+    case VIEW:
+    case START:
+        p.icon = WheelPrompt::BUTTON;
+        p.glyph = ctl == VIEW ? "VIEW" : "START";
+        p.action = ctl == VIEW ? "PRESS THE BUTTON FOR VIEW CHANGE" : "PRESS THE BUTTON FOR START";
+        p.hint = ctl == VIEW ? "The camera: behind the car or from the bonnet" : "Starts a race; in the race it pauses";
+        break;
+    default:
+        break;
+    }
+    if (g_p.setup) {
+        switch (step) {
+        case ST_INTRO:
+            p.icon = WheelPrompt::INTRO;
+            p.title = "WHEEL SETUP";
+            p.action = "YOUR WHEEL, PEDALS AND SHIFTER, STEP BY STEP";
+            p.hint = "Move each control when asked: every device below is listened to. Skip what you don't have";
+            p.lines = found_devices();
+            if (p.lines.empty()) p.lines.push_back("No wheel, pedals or shifter found. Plug them in, they show here");
+            p.choices = {"START"};
+            break;
+        case ST_ROTATION:
+            p.icon = WheelPrompt::QUARTER_TURN;
+            p.title = "WHEEL ROTATION";
+            p.action = "TURN A QUARTER TURN RIGHT, AND HOLD IT";
+            p.hint = "The top of the wheel at 3 o'clock (90\xB0). From there the game works out the rotation "
+                     "set in your wheel's software";
+            p.choices = {"SKIP"};
+            break;
+        case ST_FORCE:
+            p.icon = WheelPrompt::FORCE;
+            p.title = "FORCE FEEDBACK";
+            p.action = g_p.push_from > 0 && now >= g_p.push_from ? "WATCH THE WHEEL..." : "LET GO OF THE WHEEL";
+            p.hint = "In a moment the game pushes it by itself. See which way it turns";
+            if (g_p.push_from > 0 && now < g_p.push_from)
+                p.time_left = float(std::clamp((g_p.push_from - now) / HANDS_OFF, 0.0, 1.0));
+            p.choices = {"SKIP"};
+            break;
+        case ST_FORCE_ASK:
+            p.icon = WheelPrompt::FORCE;
+            p.title = "FORCE FEEDBACK";
+            p.action = "WHICH WAY DID THE WHEEL TURN?";
+            p.hint = "The game pushed it to the right. If it went left, the forces are turned round for you";
+            p.choices = {"RIGHT", "LEFT", "IT DID NOT MOVE", "AGAIN"};
+            break;
+        case ST_DONE:
+            p.icon = WheelPrompt::DONE;
+            p.title = "ALL SET";
+            p.action = "YOUR WHEEL IS READY";
+            p.hint = "Change any of it in this tab: choose a control and move it";
+            p.lines = g_p.summary;
+            if (p.lines.empty()) p.lines.push_back("Nothing changed");
+            p.choices = {"FINISH"};
+            break;
+        default:
+            p.choices = {step == ST_GEAR1 ? "NO H SHIFTER" : "SKIP"};
+            break;
+        }
+    }
+    return p;
+}
+
+void wheel_prompt_choose(int choice) {
+    if (!g_p.on) return;
+    if (g_p.done_at >= 0) {   // the control just taken: on at once
+        g_p.done_at = -100;
+        return;
+    }
+    if (!g_p.setup) return;
+    switch (g_p.step) {
+    case ST_INTRO: enter_step(ST_STEER); break;
+    case ST_GEAR1: enter_step(ST_VIEW); break;   // NO H SHIFTER: the four gears skipped
+    case ST_FORCE:
+        force_test_off();
+        enter_step(ST_DONE);
+        break;
+    case ST_FORCE_ASK:
+        if (choice == 3) {   // AGAIN
+            g_p.step = ST_FORCE;
+            g_testing = true;
+            g_p.push_from = now_s() + HANDS_OFF * 0.6;
+            break;
+        }
+        if (choice == 1) g_cfg.ffb_invert = !g_cfg.ffb_invert;
+        write_ini(g_cfg);
+        g_p.done = choice == 0   ? "FORCES THE RIGHT WAY ROUND"
+                   : choice == 1 ? std::string("FORCES TURNED ROUND: INVERT FORCES ") + (g_cfg.ffb_invert ? "ON" : "OFF")
+                                 : "NO FORCE FELT";
+        g_p.note = choice == 2 ? "Check GAIN, and that no other program (the wheel's own software, SimHub...) holds the wheel"
+                               : "";
+        g_p.summary.push_back("FORCE FEEDBACK: " + g_p.done);
+        g_p.done_at = now_s();
+        force_test_off();
+        g_p.push_from = -1;   // (on to ST_DONE after the message)
+        break;
+    case ST_DONE: end_prompt(); break;
+    default: next_step(); break;   // SKIP
+    }
 }
 
 std::vector<WheelRow> wheel_rows() {
@@ -825,29 +1272,34 @@ std::vector<WheelRow> wheel_rows() {
         if (r == g_none_row && now_s() < g_none_until) {
             row.value = "NO WHEEL FOUND";
             row.hint = "No wheel, pedals or other joystick found (gamepads are set apart). Plug it in and choose this again";
-        } else if (r == g_listen.row) {
-            row.value = k == STEER ? "TURN IT RIGHT..." : k == GAS || k == BRAKE ? "PRESS IT..." : "MOVE IT...";
-            row.hint = k == STEER ? "Turn the wheel to the right now (Esc cancels)"
-                       : k == HANDBRAKE ? "Pull the hand brake or press its button now (Esc cancels)"
-                       : k == GAS || k == BRAKE ? "Press the pedal down now, from rest (Esc cancels)"
-                                                : "Press the button or move the lever now (Esc cancels)";
+        } else if (k == SET_SETUP) {
+            row.value = c.setup_done ? "START" : "RECOMMENDED";
+            row.hint = "Step by step: the wheel and its rotation, the pedals, the paddles, an H shifter, and which "
+                       "way the forces push. Any step can be skipped";
         } else if (k == SET_GAIN) {
             row.value = c.ffb_strength > 0 ? std::to_string(int(std::lround(c.ffb_strength * 100))) + "%" : "OFF";
             row.fill = c.ffb_strength;
             row.hint = "How hard the wheel pushes back: the drive board's motor, bumps, slides and the road";
+            if (g_ffb_last.frames > 300) {   // the last drive: how strong, and how often at the wheel's most
+                int peak = int(std::lround(g_ffb_last.peak * 100));
+                int clip = int(std::lround(100.0 * g_ffb_last.clipped / g_ffb_last.frames));
+                row.hint += ".  Last drive: strongest " + std::to_string(peak) + "%, at the limit " +
+                            std::to_string(clip) + "% of the time" +
+                            (clip >= 5 ? ": lower GAIN for more detail" : peak < 50 ? ": there is room to raise GAIN" : "");
+            }
         } else if (k == SET_SPRING) {
             row.value = c.ffb_spring > 0 ? std::to_string(int(std::lround(c.ffb_spring * 100))) + "%" : "OFF";
             row.fill = c.ffb_spring;
             row.hint = "Pulls the wheel back to the centre when you let go. Wheels without a spring effect leave it to their driver";
         } else if (k == SET_INVERT) {
             row.value = c.ffb_invert ? "ON" : "OFF";
-            row.hint = "Turn it on if the wheel pulls the wrong way: away from the centre in the bends";
+            row.hint = "Turn it on if the wheel pulls the wrong way: away from the centre in the bends. WHEEL SETUP tests it";
         } else if (k == SET_ROTATION) {
             int deg = int(std::lround(270.0f / c.steer_range / 10.0f)) * 10;
             row.value = std::to_string(deg) + "\xB0";
-            row.fill = float(deg) / 1080.0f;
+            row.fill = std::min(float(deg) / 1080.0f, 1.0f);
             row.hint = "The rotation your wheel is set to in its driver (G HUB, Fanatec, Pit House...): "
-                       "the game turns it into the arcade wheel's 270 degrees";
+                       "the game turns it into the arcade wheel's 270 degrees. WHEEL SETUP measures it";
         } else if (k == SET_DEAD) {
             int pct = int(std::lround(c.steer_dead * 100));
             row.value = pct > 0 ? std::to_string(pct) + "%" : "OFF";
@@ -856,7 +1308,7 @@ std::vector<WheelRow> wheel_rows() {
         } else {
             int use = k == HANDBRAKE && c.ctl[HANDBRAKE] < 0 && c.ctl[HANDBRAKE_AXIS] >= 0 ? HANDBRAKE_AXIS : k;
             int n = c.ctl[use];
-            bool is_axis = use == STEER || use == GAS || use == BRAKE || use == HANDBRAKE_AXIS;
+            bool is_axis = is_axis_ctl(use);
             const Wheel* src = g_src[use];
             bool found = src && src->joy;
             std::string where = src == &g_wheel && found ? g_state.name
@@ -872,7 +1324,13 @@ std::vector<WheelRow> wheel_rows() {
                 if (dev.size() > 12) dev = dev.substr(0, 11) + ".";
                 row.value = what + " - " + dev;
                 row.hint = where + ", " + (is_axis ? "axis " : "button ") + std::to_string(n) +
-                           ". Choose it and move the control to set it again";
+                           ". Choose it and move the control to set it again; Delete clears it";
+                // What it reads now: an axis' travel, a button held
+                if (found && use == STEER) row.meter = 1, row.live = g_live.steer;
+                else if (found && use == GAS) row.meter = 2, row.live = g_live.gas;
+                else if (found && use == BRAKE) row.meter = 2, row.live = g_live.brake;
+                else if (found && use == HANDBRAKE_AXIS) row.meter = 2, row.live = g_live.handbrake;
+                else if (found) row.meter = 3, row.live = held_now(use) ? 1.0f : 0.0f;
             }
         }
         rows.push_back(row);
@@ -887,6 +1345,13 @@ void wheel_row_input(int r, int dir) {
     auto step = [&](float& v, int steps, int lo, int hi) {   // v in 1/steps
         v = float(std::clamp(int(std::lround(v * float(steps))) + dir, lo, hi)) / float(steps);
     };
+    if (k == SET_SETUP) {
+        end_prompt();
+        g_p.on = g_p.setup = true;
+        printf("[wheel] WHEEL SETUP\n");
+        enter_step(ST_INTRO);
+        return;
+    }
     if (k < 0) {
         if (k == SET_GAIN) step(c.ffb_strength, 20, 0, 20);   // 0..100 % in steps of 5
         if (k == SET_SPRING) step(c.ffb_spring, 20, 0, 20);
@@ -902,30 +1367,30 @@ void wheel_row_input(int r, int dir) {
         return;
     }
     // A control: every joystick listened to until one of them moves
-    end_listen();
-    g_listen.row = r;
-    g_listen.since = now_s();
-    int count = 0;
-    SDL_JoystickID* ids = SDL_GetJoysticks(&count);
-    for (int i = 0; ids && i < count; i++) {
-        if (SDL_IsGamepad(ids[i]) && SDL_GetJoystickTypeForID(ids[i]) != SDL_JOYSTICK_TYPE_WHEEL) continue;
-        SDL_Joystick* j = SDL_OpenJoystick(ids[i]);
-        if (!j) continue;
-        Snap s{};
-        s.joy = j;
-        s.id = ids[i];
-        s.axes = std::min(SDL_GetNumJoystickAxes(j), 16);
-        s.buttons = std::clamp(SDL_GetNumJoystickButtons(j), 0, MAX_BUTTONS);
-        take_snap(s);
-        g_listen.snaps.push_back(s);
-    }
-    SDL_free(ids);
-    printf("[wheel] %s: listening to %d devices\n", ROWS[r].label, int(g_listen.snaps.size()));
-    if (g_listen.snaps.empty()) {   // nothing to wait for
-        end_listen();
+    end_prompt();
+    g_p.on = true;
+    g_p.done_ctl = k;
+    start_listen(k);
+    if (g_p.snaps.empty()) {   // nothing to wait for
+        end_prompt();
         g_none_row = r;
         g_none_until = now_s() + 3.0;
     }
+}
+
+void wheel_row_clear(int r) {
+    if (r < 0 || r >= ROW_COUNT || !g_ok || g_p.on) return;
+    int k = ROWS[r].ctl;
+    if (k < 0) return;
+    g_cfg.ctl[k] = -1;
+    g_cfg.dev[k].clear();
+    if (k == HANDBRAKE) {
+        g_cfg.ctl[HANDBRAKE_AXIS] = -1;
+        g_cfg.dev[HANDBRAKE_AXIS].clear();
+    }
+    write_ini(g_cfg);
+    printf("[wheel] %s cleared\n", ctl_label(k));
+    reopen_all();
 }
 
 void wheels_poll(bool focused, bool menu, std::vector<PadKey>& keys) {
@@ -933,7 +1398,11 @@ void wheels_poll(bool focused, bool menu, std::vector<PadKey>& keys) {
     menu = focused && menu;
     g_focused = driving;
     fake_poll();
-    listen_poll();
+    prompt_poll();
+    if (!driving && g_ffb_now.frames > 0) {   // a drive over (or paused): its force for GAIN's hint
+        if (g_ffb_now.frames > 300) g_ffb_last = g_ffb_now;
+        g_ffb_now = FfbStats{};
+    }
     Wheel& w = g_wheel;
     WheelState& st = g_state;
     st.shift_up = st.shift_down = st.coin = st.start = st.moved = false;
@@ -1086,7 +1555,7 @@ void wheels_poll(bool focused, bool menu, std::vector<PadKey>& keys) {
 }
 
 void wheels_shutdown() {
-    end_listen();
+    end_prompt();
     for (Wheel& d : g_devices)
         if (d.joy) wheels_removed(d.id);
     if (g_wheel.joy) wheels_removed(g_wheel.id);

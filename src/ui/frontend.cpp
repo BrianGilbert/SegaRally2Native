@@ -916,7 +916,7 @@ int Frontend::index_of(Id id) const {
 }
 
 void Frontend::back() {
-    if (screen_ == Screen::Options && wheel_listening) {   // a wheel control listening: Esc stops it, nothing else
+    if (screen_ == Screen::Options && wheel_prompt.on) {   // a wheel control listening, WHEEL SETUP: Esc stops it, nothing else
         push(Action::WheelCancel);
         dirty_ = true;
         return;
@@ -965,6 +965,16 @@ bool Frontend::key(int vk) {
         }
         return true;
     }
+    if (screen_ == Screen::Options && wheel_prompt.on) {   // the WHEEL tab's window: its choices, Esc stops it
+        int nc = int(wheel_prompt.choices.size());
+        switch (vk) {
+        case VK_LEFT: case 'A': if (nc) wheel_choice = (wheel_choice + nc - 1) % nc; dirty_ = true; break;
+        case VK_RIGHT: case 'D': case VK_TAB: if (nc) wheel_choice = (wheel_choice + 1) % nc; dirty_ = true; break;
+        case VK_RETURN: case VK_SPACE: push(Action::WheelChoose); break;
+        case VK_ESCAPE: case VK_BACK: back(); break;
+        }
+        return true;
+    }
     if (screen_ == Screen::Options && (vk == VK_RETURN || vk == VK_SPACE)) {   // RESOLUTION: Enter opens its list
         auto l = items();
         if (selected_ > 0 && selected_ < int(l.size()) && l[selected_].id == OPT_RESOLUTION && l[selected_].enabled) {
@@ -978,6 +988,11 @@ bool Frontend::key(int vk) {
                                         list[selected_].id == DEBUG_CAR || list[selected_].id == DEBUG_GEARS ||
                                         list[selected_].id == DEBUG_TIME || list[selected_].id == PAUSE_CREDIT);
     bool tabs_row = selected_ < n && list[selected_].id == TABS;
+    if (screen_ == Screen::Options && (vk == VK_DELETE || vk == 'G') && selected_ < n && list[selected_].id == OPT_WHEEL) {
+        wheel_row = list[selected_].index;   // a wheel control: not set any more (Delete, the pad's Y)
+        push(Action::WheelClear);
+        return true;
+    }
     if (screen_ == Screen::Records) switch (vk) {   // sections and rows as on the settings page; nothing to change
         case 'Q': case VK_PRIOR: case VK_LEFT: case 'A': set_tab(tab_ - 1); return true;
         case 'E': case VK_NEXT: case VK_RIGHT: case 'D': set_tab(tab_ + 1); return true;
@@ -1230,6 +1245,14 @@ void Frontend::click(int x, int y) {
             if (PtInRect(&restart_buttons_[b], p)) restart_choose(b);
         return;
     }
+    if (screen_ == Screen::Options && wheel_prompt.on) {   // the WHEEL tab's window: only its choices
+        for (size_t i = 0; i < prompt_choices_.size(); i++)
+            if (PtInRect(&prompt_choices_[i], p)) {
+                wheel_choice = int(i);
+                push(Action::WheelChoose);
+            }
+        return;
+    }
     if (setup_open_ && screen_ == Screen::Play) {
         for (int r = 0; r < 6; r++)
             if (PtInRect(&setup_rects_[r], p)) {
@@ -1283,6 +1306,7 @@ void Frontend::click(int x, int y) {
 
 void Frontend::wheel(int x, int y, int delta) {
     if (starting || screen_ == Screen::Splash || (news_open_ && screen_ == Screen::Main)) return;
+    if (screen_ == Screen::Options && wheel_prompt.on) return;
     if (setup_open_ && screen_ == Screen::Play) {   // over an option: change it
         if (setup_sel_ < 4) setup_change(setup_sel_, delta > 0 ? +1 : -1);
         return;
@@ -2532,6 +2556,76 @@ const std::wstring& Frontend::wheel_group(int i) const {
 
 float Frontend::wheel_fill(int i) const { return i >= 0 && i < int(wheel_lines.size()) ? wheel_lines[size_t(i)].fill : -1.0f; }
 
+// ---- Smooth shapes for the WHEEL tab, a pixel at a time over their box ----
+
+namespace {
+template <class Cover, class Put>
+void shape_px(int x0, int y0, int x1, int y1, int w, int h, Cover&& cover, Put&& put) {
+    for (int py = std::max(y0, 0); py < std::min(y1, h); py++)
+        for (int px = std::max(x0, 0); px < std::min(x1, w); px++) {
+            float c = cover(float(px) + 0.5f, float(py) + 0.5f);
+            if (c > 0) put(px, py, c);
+        }
+}
+}  // namespace
+
+void Frontend::aa_ring(float cx, float cy, float r0, float r1, uint32_t rgb, float alpha) {
+    shape_px(int(cx - r1) - 1, int(cy - r1) - 1, int(cx + r1) + 2, int(cy + r1) + 2, w_, h_,
+             [&](float px, float py) {
+                 float d = std::hypot(px - cx, py - cy);
+                 return std::clamp(d - r0 + 0.5f, 0.0f, 1.0f) * std::clamp(r1 - d + 0.5f, 0.0f, 1.0f);
+             },
+             [&](int x, int y, float c) { blend(x, y, rgb, c * alpha); });
+}
+
+void Frontend::aa_line(float ax, float ay, float bx, float by, float half, uint32_t rgb, float alpha) {
+    float vx = bx - ax, vy = by - ay, len2 = std::max(vx * vx + vy * vy, 1e-4f);
+    shape_px(int(std::min(ax, bx) - half) - 1, int(std::min(ay, by) - half) - 1, int(std::max(ax, bx) + half) + 2,
+             int(std::max(ay, by) + half) + 2, w_, h_,
+             [&](float px, float py) {
+                 float t = std::clamp(((px - ax) * vx + (py - ay) * vy) / len2, 0.0f, 1.0f);
+                 return std::clamp(half - std::hypot(px - ax - t * vx, py - ay - t * vy) + 0.5f, 0.0f, 1.0f);
+             },
+             [&](int x, int y, float c) { blend(x, y, rgb, c * alpha); });
+}
+
+void Frontend::aa_arc(float cx, float cy, float r, float half, float a0, float a1, uint32_t rgb, float alpha) {
+    if (a1 <= a0) return;
+    const float two_pi = 6.2831853f;
+    shape_px(int(cx - r - half) - 1, int(cy - r - half) - 1, int(cx + r + half) + 2, int(cy + r + half) + 2, w_, h_,
+             [&](float px, float py) {
+                 float d = std::hypot(px - cx, py - cy);
+                 float c = std::clamp(half - std::fabs(d - r) + 0.5f, 0.0f, 1.0f);
+                 if (c <= 0) return 0.0f;
+                 float a = std::atan2(px - cx, cy - py);   // 0 up, clockwise
+                 while (a < a0) a += two_pi;
+                 while (a > a0 + two_pi) a -= two_pi;
+                 return a <= a1 ? c : 0.0f;
+             },
+             [&](int x, int y, float c) { blend(x, y, rgb, c * alpha); });
+}
+
+// A steering wheel: rim, three spokes, the hub and the red mark at the top, turned deg (right +)
+void Frontend::draw_wheel_icon(float cx, float cy, float r, float deg, float dim) {
+    const float a = deg * 3.14159265f / 180.0f, rim = r * 0.13f;
+    auto at = [&](float ang, float rad, float& ox, float& oy) {   // ang 0 = up, clockwise
+        ox = cx + std::sin(ang + a) * rad;
+        oy = cy - std::cos(ang + a) * rad;
+    };
+    aa_ring(cx, cy, r - rim, r, 0xE8EEF6, 0.95f * dim);
+    for (float sp : {1.5707964f, -1.5707964f, 3.14159265f}) {   // right, left, bottom
+        float ox, oy;
+        at(sp, r - rim * 0.5f, ox, oy);
+        aa_line(cx, cy, ox, oy, r * (sp > 3 ? 0.07f : 0.09f), 0xC8D2E0, 0.9f * dim);
+    }
+    aa_ring(cx, cy, -1.0f, r * 0.27f, 0x1A2230, 1);
+    aa_ring(cx, cy, r * 0.22f, r * 0.27f, 0xC8D2E0, 0.9f * dim);
+    float ax, ay, bx, by;
+    at(0, r - rim + r * 0.06f, ax, ay);   // (the round ends inside the rim)
+    at(0, r - r * 0.06f, bx, by);
+    aa_line(ax, ay, bx, by, r * 0.06f, SABER, dim);
+}
+
 // The WHEEL tab's panel, at its bottom: the wheel turning as the real one
 // does (the arcade's 270 degrees of lock, so with WHEEL ROTATION right it
 // matches the wheel in your hands) and the pedals filling as they go down.
@@ -2545,53 +2639,12 @@ int Frontend::draw_wheel_live(int x, int inner, int y_bottom) {
     const int r = std::max(U(40), std::min(U(112), (inner - pedals_w - U(48)) / 2));
     const int y_top = y_bottom - 2 * r - label_h;
     const int cx = x + r, cy = y_top + r;
-    // Anti-aliased shapes, a pixel at a time over their box
-    auto shape = [&](int x0, int y0, int x1, int y1, uint32_t rgb, float alpha, auto&& cover) {
-        for (int py = std::max(y0, 0); py < std::min(y1, h_); py++)
-            for (int px = std::max(x0, 0); px < std::min(x1, w_); px++) {
-                float c = cover(float(px) + 0.5f, float(py) + 0.5f);
-                if (c > 0) blend(px, py, rgb, c * alpha);
-            }
-    };
-    auto ring = [&](float rx, float ry, float r0, float r1, uint32_t rgb, float alpha) {
-        shape(int(rx - r1) - 1, int(ry - r1) - 1, int(rx + r1) + 2, int(ry + r1) + 2, rgb, alpha, [&](float px, float py) {
-            float d = std::hypot(px - rx, py - ry);
-            return std::clamp(d - r0 + 0.5f, 0.0f, 1.0f) * std::clamp(r1 - d + 0.5f, 0.0f, 1.0f);
-        });
-    };
-    auto bar = [&](float ax, float ay, float bx, float by, float half, uint32_t rgb, float alpha) {   // a thick line
-        shape(int(std::min(ax, bx) - half) - 1, int(std::min(ay, by) - half) - 1, int(std::max(ax, bx) + half) + 2,
-              int(std::max(ay, by) + half) + 2, rgb, alpha, [&](float px, float py) {
-                  float vx = bx - ax, vy = by - ay, t = std::clamp(((px - ax) * vx + (py - ay) * vy) / (vx * vx + vy * vy), 0.0f, 1.0f);
-                  float d = std::hypot(px - ax - t * vx, py - ay - t * vy);
-                  return std::clamp(half - d + 0.5f, 0.0f, 1.0f);
-              });
-    };
-    // The wheel: rim, three spokes, the hub, the red mark at the top, all turned
-    const float deg = std::clamp(lv.steer, -1.0f, 1.0f) * 135.0f, a = deg * 3.14159265f / 180.0f;
-    const float fr = float(r), rim = fr * 0.13f;
-    auto at = [&](float ang, float rad, float& ox, float& oy) {   // ang 0 = up, clockwise
-        ox = float(cx) + std::sin(ang + a) * rad;
-        oy = float(cy) - std::cos(ang + a) * rad;
-    };
-    ring(float(cx), float(cy), fr - rim, fr, 0xE8EEF6, 0.95f * dim);
-    for (float sp : {1.5707964f, -1.5707964f, 3.14159265f}) {   // right, left, bottom
-        float ox, oy;
-        at(sp, fr - rim * 0.5f, ox, oy);
-        bar(float(cx), float(cy), ox, oy, fr * (sp > 3 ? 0.07f : 0.09f), 0xC8D2E0, 0.9f * dim);
-    }
-    ring(float(cx), float(cy), -1.0f, fr * 0.27f, 0x1A2230, 1);
-    ring(float(cx), float(cy), fr * 0.22f, fr * 0.27f, 0xC8D2E0, 0.9f * dim);
-    {
-        float ax, ay, bx, by;
-        at(0, fr - rim + fr * 0.06f, ax, ay);   // (the round ends inside the rim)
-        at(0, fr - fr * 0.06f, bx, by);
-        bar(ax, ay, bx, by, fr * 0.06f, SABER, dim);
-    }
+    const float deg = std::clamp(lv.steer, -1.0f, 1.0f) * 135.0f;
+    draw_wheel_icon(float(cx), float(cy), float(r), deg, dim);
     if (lv.gear >= 0)   // an H shifter's gear in the hub
         text(TITLE, U(30), lv.gear == 0 ? L"N" : std::to_wstring(lv.gear), cx, cy - U(17), 1, {0xFFFFFF, 0xE2EAF4});
     int ideg = int(std::lround(std::fabs(deg)));
-    std::wstring turn = !lv.on ? L"NO WHEEL" : ideg == 0 ? L"0\u00B0" : (deg < 0 ? L"L " : L"R ") + std::to_wstring(ideg) + L"\u00B0";
+    std::wstring turn = !lv.on ? L"NO WHEEL" : ideg == 0 ? L"0°" : (deg < 0 ? L"L " : L"R ") + std::to_wstring(ideg) + L"°";
     text(ROW_MEDIUM, U(20), turn, cx, y_bottom - U(22), 1, {lv.on ? 0xD6DEEAu : PAGE_FAINT, lv.on ? 0xD6DEEAu : PAGE_FAINT});
     // The pedals: hand brake, brake, accelerator, at the right
     const int px0 = x + inner - pedals_w, ptop = y_top + U(24), pbot = y_bottom - label_h;
@@ -2608,6 +2661,202 @@ int Frontend::draw_wheel_live(int x, int inner, int y_bottom) {
         text(ROW_MEDIUM, U(18), pedals[i].name, (bx0 + bx1) / 2, y_bottom - U(22), 1, {PAGE_DIM, PAGE_DIM});
     }
     return y_top - U(24);   // (the numbers over the pedals)
+}
+
+// A control listening, or WHEEL SETUP: a window over the page, with a
+// picture of what to do (moving), what moves now, and the choices
+void Frontend::draw_wheel_prompt() {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    auto Uf = [&](float v) { return v * u_; };
+    const WheelPromptView& p = wheel_prompt;
+    const double t = menu_clock();
+    const bool setup = p.kicker == L"WHEEL SETUP";
+    const bool done = !p.done.empty();
+    const bool listening = !done && p.icon >= 1 && p.icon <= 6;   // (TURN_RIGHT .. GEAR: something to move)
+    fill(0, 0, w_, h_, 0x000000, 0.72f);
+    const int cw = std::min(w_ - 2 * U(60), U(1180)), ch = std::min(h_ - 2 * U(50), U(640));
+    const int x0 = (w_ - cw) / 2, y0 = (h_ - ch) / 2, x1 = x0 + cw, y1 = y0 + ch, pad = U(44);
+    fill(x0, y0, x1, y1, PANEL, 0.97f);
+    frame(x0, y0, x1, y1, std::max(1, U(1)), PAGE_LINE, 1);
+    fill(x0, y0, x1, y0 + std::max(3, U(6)), SABER, 1);
+    if (done && p.done_age >= 0)   // just taken: a green flash, fading
+        fill(x0, y0 + std::max(3, U(6)), x1, y1, 0x2E9E4A, std::clamp(0.3f - p.done_age * 0.45f, 0.0f, 0.3f));
+
+    // Where this is: the kicker, the setup's steps as segments, the title
+    int y = y0 + U(30);
+    std::wstring kick = p.kicker;
+    if (p.steps > 0) kick += L"   ·   STEP " + std::to_wstring(p.step) + L" OF " + std::to_wstring(p.steps);
+    text(ROW_MEDIUM, U(22), kick, x0 + pad, y, 0, {GROUP_RED, GROUP_RED});
+    if (p.steps > 0) {
+        int sw = U(30), sg = U(6), sx = x1 - pad - p.steps * sw - (p.steps - 1) * sg;
+        for (int i = 0; i < p.steps; i++) {
+            uint32_t c = i < p.step - 1 ? SABER : i == p.step - 1 ? GOLD_BOTTOM : 0x2A3240;
+            fill(sx + i * (sw + sg), y + U(9), sx + i * (sw + sg) + sw, y + U(15), c, 1);
+        }
+    }
+    y += U(36);
+    text(TITLE, U(64), p.title, x0 + pad, y, 0, {0xFFFFFF, 0xE2EAF4, 0, 0, 1, U(3)});
+
+    // The picture, at the left
+    const int foot_h = U(96);
+    const int box = std::max(U(120), std::min(U(330), y1 - foot_h - (y0 + U(170)) - U(10)));
+    const int bx = x0 + pad, by = y0 + U(170);
+    const float icx = float(bx + box / 2), icy = float(by + box / 2), R = float(box) * 0.36f;
+    const float ph = float(std::fmod(t, 2.4) / 2.4);   // the animations' phase, 0..1
+    auto ease = [](float v) { v = std::clamp(v, 0.0f, 1.0f); return v * v * (3 - 2 * v); };
+    auto loop = [&](float v) { return v < 0.45f ? ease(v / 0.45f) : v < 0.75f ? 1.0f : 1.0f - ease((v - 0.75f) / 0.25f); };
+    auto arrow_arc = [&](float cx, float cy, float r, float a0, float a1, uint32_t c, float alpha) {   // clockwise
+        float half = Uf(4.5f);
+        aa_arc(cx, cy, r, half, a0, a1, c, alpha);
+        float tx = cx + std::sin(a1) * r, ty = cy - std::cos(a1) * r;   // its head
+        float dx = std::cos(a1), dy = std::sin(a1), nx = std::sin(a1), ny = -std::cos(a1), L = Uf(16);
+        float hx = tx + dx * Uf(6), hy = ty + dy * Uf(6);
+        aa_line(hx, hy, hx - dx * L + nx * L * 0.7f, hy - dy * L + ny * L * 0.7f, half, c, alpha);
+        aa_line(hx, hy, hx - dx * L - nx * L * 0.7f, hy - dy * L - ny * L * 0.7f, half, c, alpha);
+    };
+    switch (p.icon) {
+    case 0:   // INTRO: the wheel, rocking gently
+        draw_wheel_icon(icx, icy, R, float(std::sin(t * 1.7) * 22.0), 1);
+        break;
+    case 1:   // TURN_RIGHT
+    case 7:   // FORCE
+        draw_wheel_icon(icx, icy, R, p.icon == 1 ? loop(ph) * 75.0f : float(std::sin(t * 9.0) * (p.time_left >= 0 ? 0 : 6)), 1);
+        arrow_arc(icx, icy, R * 1.22f, -0.55f, 0.65f, GOLD_BOTTOM, 0.95f);
+        break;
+    case 2: {   // QUARTER_TURN: to the mark at 3 o'clock, and the hold filling round
+        float tx0 = icx + R * 1.1f, tx1 = icx + R * 1.32f;
+        aa_line(tx0, icy, tx1, icy, Uf(4), GOLD_BOTTOM, 1);
+        text(ROW_MEDIUM, U(24), L"90°", int(tx1) + U(10), int(icy) - U(14), 0, {GOLD_TOP, GOLD_BOTTOM});
+        draw_wheel_icon(icx, icy, R, loop(ph) * 90.0f, 0.35f + 0.65f * (p.progress > 0 ? 1.0f : 0.6f));
+        aa_arc(icx, icy, R * 1.2f, Uf(3), 0, 6.2831853f, 0x2A3240, 1);
+        aa_arc(icx, icy, R * 1.2f, Uf(4), 0, p.progress * 6.2831853f, 0x4CC264, 1);
+        break;
+    }
+    case 3: {   // PEDAL: the plate going down, filling as the real one moves
+        float pw = R * 0.85f, phh = R * 1.55f, top = icy - phh / 2 + loop(ph) * R * 0.18f;
+        int l = int(icx - pw / 2), r = int(icx + pw / 2), tp = int(top), bt = int(top + phh);
+        fill(l, tp, r, bt, 0x2A3240, 1);
+        uint32_t c = p.glyph == L"GAS" ? 0x4CC264 : SABER;
+        fill(l, bt - int(float(bt - tp) * p.progress), r, bt, c, 1);
+        for (int g = 1; g < 5; g++) fill(l + U(8), tp + (bt - tp) * g / 5, r - U(8), tp + (bt - tp) * g / 5 + std::max(1, U(2)), 0x000000, 0.35f);
+        frame(l, tp, r, bt, std::max(1, U(2)), 0xC8D2E0, 0.9f);
+        aa_line(icx, float(bt), icx, icy + R * 1.15f, Uf(5), 0x8A98AC, 1);   // its arm
+        triangle(int(icx), tp - U(30) + int(loop(ph) * Uf(12)), U(26), 2, GOLD_BOTTOM, 0.95f);
+        text(ROW_MEDIUM, U(22), p.glyph, int(icx), int(icy + R * 1.2f), 1, {PAGE_TEXT, PAGE_TEXT});
+        break;
+    }
+    case 4: {   // HAND_BRAKE: the lever pulled up and back
+        float pvx = icx + R * 0.5f, pvy = icy + R * 0.75f, len = R * 1.45f;
+        float a = (-0.35f - loop(ph) * 0.55f);   // from upright-ish, back towards you
+        float ex = pvx + std::sin(a) * len, ey = pvy - std::cos(a) * len;
+        fill(int(pvx - R * 0.6f), int(pvy), int(pvx + R * 0.35f), int(pvy + Uf(14)), 0x8A98AC, 1);
+        aa_line(pvx, pvy, ex, ey, Uf(9), 0xC8D2E0, 1);
+        aa_ring(ex, ey, -1, Uf(18), SABER, 1);
+        aa_ring(pvx, pvy, -1, Uf(9), 0x8A98AC, 1);
+        arrow_arc(pvx, pvy, len * 1.12f, -0.95f, -0.35f, GOLD_BOTTOM, 0.5f + 0.5f * p.progress);
+        break;
+    }
+    case 5: {   // BUTTON: what is on it, a ring going out
+        float br = R * 0.62f, out = br + ph * R * 0.5f;
+        aa_ring(icx, icy, out - Uf(3), out, GOLD_BOTTOM, 1.0f - ph);
+        aa_ring(icx, icy, -1, br, 0x2A3240, 1);
+        aa_ring(icx, icy, br - Uf(5), br, 0xC8D2E0, 0.95f);
+        int gp = p.glyph.size() <= 1 ? U(72) : p.glyph.size() <= 4 ? U(40) : U(32);
+        text(TITLE, gp, p.glyph, int(icx), int(icy) - gp * 6 / 10, 1, {0xFFFFFF, 0xE2EAF4});
+        break;
+    }
+    case 6: {   // GEAR: the H gate, the knob going to the gear asked
+        float xl = icx - R * 0.55f, xr = icx + R * 0.55f, yt = icy - R * 0.8f, yb = icy + R * 0.8f, xm = (xl + xr) / 2;
+        uint32_t gate = 0x5A6476;
+        aa_line(xl, yt, xl, yb, Uf(6), gate, 1);
+        aa_line(xr, yt, xr, yb, Uf(6), gate, 1);
+        aa_line(xl, icy, xr, icy, Uf(6), gate, 1);
+        const float gx[4] = {xl, xl, xr, xr}, gy[4] = {yt, yb, yt, yb};
+        for (int g = 0; g < 4; g++) {
+            bool want = g + 1 == p.gear;
+            aa_ring(gx[g], gy[g], -1, Uf(24), want ? GOLD_BOTTOM : 0x2A3240, 1);
+            text(TITLE, U(30), std::to_wstring(g + 1), int(gx[g]), int(gy[g]) - U(18), 1,
+                 want ? Style{0x1A1200, 0x1A1200} : Style{PAGE_TEXT, PAGE_TEXT});
+        }
+        int g = std::clamp(p.gear, 1, 4) - 1;   // the knob: across, then up or down
+        float k = loop(ph), kx = xm + (gx[g] - xm) * std::min(k * 2, 1.0f), ky = icy + (gy[g] - icy) * std::max(k * 2 - 1, 0.0f);
+        aa_ring(kx, ky, -1, Uf(14), SABER, 0.95f);
+        break;
+    }
+    case 8:   // DONE
+        aa_ring(icx, icy, -1, R * 0.75f, 0x2E9E4A, 1);
+        aa_line(icx - R * 0.32f, icy + R * 0.02f, icx - R * 0.08f, icy + R * 0.26f, Uf(10), 0xFFFFFF, 1);
+        aa_line(icx - R * 0.08f, icy + R * 0.26f, icx + R * 0.36f, icy - R * 0.22f, Uf(10), 0xFFFFFF, 1);
+        break;
+    }
+
+    // What to do, at the right
+    const int tx = bx + box + U(56), tw = x1 - pad - tx;
+    int ty = by;
+    const Style gold{GOLD_TOP, GOLD_BOTTOM, 0, 0, 1, U(2)};
+    if (done) {
+        float cy = float(ty + U(26));
+        aa_ring(float(tx) + Uf(22), cy, -1, Uf(22), 0x2E9E4A, 1);
+        aa_line(float(tx) + Uf(12), cy, float(tx) + Uf(19), cy + Uf(8), Uf(3), 0xFFFFFF, 1);
+        aa_line(float(tx) + Uf(19), cy + Uf(8), float(tx) + Uf(33), cy - Uf(8), Uf(3), 0xFFFFFF, 1);
+        for (const std::wstring& line : wrap(ROW, U(38), p.done, tw - U(64))) {
+            text(ROW, U(38), line, tx + U(64), ty, 0, {0x9CF5B4, 0x4CC264, 0, 0, 1, U(2)});
+            ty += U(50);
+        }
+        ty += U(10);
+        for (const std::wstring& line : wrap(BODY, U(24), p.note, tw)) {
+            text(BODY, U(24), line, tx, ty, 0, {0xD6DEEA, 0xD6DEEA});
+            ty += U(34);
+        }
+    } else {
+        for (const std::wstring& line : wrap(ROW, U(38), p.action, tw)) {
+            text(ROW, U(38), line, tx, ty, 0, gold);
+            ty += U(50);
+        }
+        ty += U(8);
+        for (const std::wstring& line : wrap(BODY, U(24), p.hint, tw)) {
+            text(BODY, U(24), line, tx, ty, 0, {0xD6DEEA, 0xD6DEEA});
+            ty += U(34);
+        }
+        ty += U(10);
+        for (const std::wstring& line : p.lines) {   // the devices found, or what the setup set
+            if (ty + U(30) > y1 - foot_h - U(10)) break;
+            fill(tx, ty + U(12), tx + U(8), ty + U(20), SABER, 1);
+            text(BODY, U(22), line, tx + U(20), ty, 0, {PAGE_TEXT, PAGE_TEXT});
+            ty += U(32);
+        }
+        if (listening) {   // what moves now, and how far towards being taken
+            int my = y1 - foot_h - U(70);
+            std::wstring what = !p.moving.empty() ? p.moving : p.icon == 2 ? L"HOLD IT STILL" : L"WAITING FOR IT TO MOVE...";
+            text(ROW_MEDIUM, U(18), what, tx, my, 0, {PAGE_DIM, PAGE_DIM});
+            int mb = my + U(30);
+            fill(tx, mb, x1 - pad, mb + U(12), 0x2A3240, 1);
+            fill(tx, mb, tx + int(float(x1 - pad - tx) * p.progress), mb + U(12), mix(SABER, 0x4CC264, p.progress), 1);
+        }
+    }
+
+    // The countdown, along the window's bottom edge
+    if (p.time_left >= 0) fill(x0, y1 - U(5), x0 + int(float(cw) * p.time_left), y1, GOLD_BOTTOM, 0.9f);
+
+    // The keys at the left, the choices at the right
+    const int fy = y1 - foot_h + U(26);
+    fill(x0 + pad, fy - U(18), x1 - pad, fy - U(18) + std::max(1, U(1)), PAGE_LINE, 1);
+    int kx = x0 + pad, kh = U(32);
+    prompt(kx, fy + U(7), kh, L"B", L"ESC", setup ? L"STOP SETUP" : L"CANCEL");
+    if (!p.choices.empty()) prompt(kx, fy + U(7), kh, L"A", L"ENTER", L"CHOOSE");
+    prompt_choices_.assign(p.choices.size(), RECT{});
+    int cx = x1 - pad;
+    for (int i = int(p.choices.size()) - 1; i >= 0; i--) {
+        int bw = measure(ROW, U(26), p.choices[size_t(i)]) + U(48);
+        RECT r{cx - bw, fy, cx, fy + U(46)};
+        bool sel = i == wheel_choice;
+        fill(r.left, r.top, r.right, r.bottom, sel ? GOLD_BOTTOM : 0x1A2230, 1);
+        frame(r.left, r.top, r.right, r.bottom, std::max(1, U(1)), sel ? GOLD_TOP : PAGE_LINE, 1);
+        text(ROW, U(26), p.choices[size_t(i)], (r.left + r.right) / 2, r.top + U(8), 1,
+             sel ? Style{0x1A1200, 0x1A1200} : Style{PAGE_TEXT, PAGE_TEXT});
+        prompt_choices_[size_t(i)] = r;
+        cx = r.left - U(16);
+    }
 }
 
 void Frontend::draw_options_page(const std::vector<Item>& list, bool over_game) {
@@ -2756,6 +3005,24 @@ void Frontend::draw_options_page(const std::vector<Item>& list, bool over_game) 
         int ty = y + (row_h - text_h) / 2, cy = y + row_h / 2;
         uint32_t lc = it.enabled ? PAGE_TEXT : PAGE_FAINT;
         int lw = text(ROW, label_px, it.label, rows_x0, ty, 0, {lc, lc, 0, 0, 1, U(2)});
+        if (it.id == OPT_WHEEL && it.index >= 0 && it.index < int(wheel_lines.size()) && wheel_lines[size_t(it.index)].meter) {
+            // what the control reads now: the steering from the middle, a pedal, a button's light
+            const WheelLine& wl = wheel_lines[size_t(it.index)];
+            int mx0 = rows_x0 + std::max(lw + U(18), U(200)), mw = U(70), mh = U(8);
+            if (wl.meter == 3) {
+                bool on = wl.live > 0.5f;
+                aa_ring(float(mx0 + U(8)), float(cy), on ? -1.0f : float(U(5)), float(U(7)), on ? 0x6CE88A : 0x5A6476, 1);
+            } else {
+                fill(mx0, cy - mh / 2, mx0 + mw, cy + mh / 2, 0x2A3240, 1);
+                if (wl.meter == 1) {
+                    int mid = mx0 + mw / 2, at = mid + int(float(mw / 2) * std::clamp(wl.live, -1.0f, 1.0f));
+                    fill(std::min(mid, at), cy - mh / 2, std::max(mid, at) + 1, cy + mh / 2, GOLD_BOTTOM, 1);
+                    fill(mid, cy - mh, mid + std::max(1, U(2)), cy + mh, PAGE_DIM, 1);
+                } else {
+                    fill(mx0, cy - mh / 2, mx0 + int(float(mw) * std::clamp(wl.live, 0.0f, 1.0f)), cy + mh / 2, 0x4CC264, 1);
+                }
+            }
+        }
         if ((it.id == OPT_SCALE && settings.render_scale != scale_at_launch) || (it.id == OPT_AA && settings.aa != aa_at_launch)) {
             // changed, waiting for a restart
             int tx = rows_x0 + lw + U(14), tw = measure(ROW, U(15), L"RESTART") + U(16);
@@ -2857,8 +3124,11 @@ void Frontend::draw_options_page(const std::vector<Item>& list, bool over_game) 
         : rec ? std::vector<Key>{{nullptr, L"UP / DOWN", L"SELECT"}, {nullptr, L"Q / E", L"SECTION"}, {nullptr, L"ESC", L"BACK"}}
               : std::vector<Key>{{nullptr, L"UP / DOWN", L"SELECT"}, {nullptr, L"LEFT / RIGHT", L"CHANGE"},
                                  {nullptr, L"Q / E", L"SECTION"}, {nullptr, L"ESC", L"BACK"}};
+    if (!rec && tab_ == WHEEL_TAB) keys.insert(keys.end() - 1, Key{L"Y", L"DEL", L"CLEAR"});
     int kh = U(34), kx = mx;
     for (const Key& k : keys) prompt(kx, h - U(38) - kh / 2, kh, k.pad, k.key, k.what);
+    if (!rec && tab_ == WHEEL_TAB && wheel_prompt.on) draw_wheel_prompt();
+    else prompt_choices_.clear();
 }
 
 bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {
