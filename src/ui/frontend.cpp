@@ -2819,11 +2819,18 @@ void Frontend::draw_wheel_prompt() {
             ty += U(34);
         }
         ty += U(10);
-        for (const std::wstring& line : p.lines) {   // the devices found, or what the setup set
-            if (ty + U(30) > y1 - foot_h - U(10)) break;
-            fill(tx, ty + U(12), tx + U(8), ty + U(20), SABER, 1);
-            text(BODY, U(22), line, tx + U(20), ty, 0, {PAGE_TEXT, PAGE_TEXT});
-            ty += U(32);
+        {   // the devices found, or what the setup set: in two columns, smaller, when one does not hold them
+            int room = std::max(1, (y1 - foot_h - U(10) - ty) / U(32));
+            bool two = int(p.lines.size()) > room;
+            int lh = two ? U(28) : U(32), lpx = two ? U(19) : U(22), per = two ? std::max(1, (y1 - foot_h - U(10) - ty) / lh) : room;
+            int colw = two ? (tw - U(24)) / 2 : tw;
+            for (size_t i = 0; i < p.lines.size() && int(i) < per * (two ? 2 : 1); i++) {
+                int lx = tx + (int(i) >= per ? colw + U(24) : 0), ly = ty + (int(i) % per) * lh;
+                fill(lx, ly + U(11), lx + U(7), ly + U(18), SABER, 1);
+                std::wstring line = p.lines[i];
+                while (line.size() > 4 && measure(BODY, lpx, line) > colw - U(20)) line = line.substr(0, line.size() - 2) + L".";
+                text(BODY, lpx, line, lx + U(18), ly, 0, {PAGE_TEXT, PAGE_TEXT});
+            }
         }
         if (listening) {   // what moves now, and how far towards being taken
             int my = y1 - foot_h - U(70);

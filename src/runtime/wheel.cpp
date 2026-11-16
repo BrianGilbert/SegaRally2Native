@@ -975,7 +975,15 @@ void take(int k, uint32_t id, bool is_axis, int index, int16_t from, int16_t to)
     g_p.done = (is_axis ? "AXIS " : "BUTTON ") + std::to_string(index) + "  -  " + dev;
     g_p.note = note;
     g_p.done_at = now_s();
-    g_p.summary.push_back(std::string(ctl_label(k)) + ": " + g_p.done);
+    if (k >= GEAR1 && k <= GEAR4) {   // the gears in one line of the summary
+        std::string line = "H SHIFTER: GEAR " + std::to_string(k - GEAR1 + 1);
+        if (!g_p.summary.empty() && g_p.summary.back().rfind("H SHIFTER: GEAR", 0) == 0)
+            g_p.summary.back() += ", " + std::to_string(k - GEAR1 + 1);
+        else
+            g_p.summary.push_back(line);
+    } else {
+        g_p.summary.push_back(std::string(ctl_label(k)) + ": " + g_p.done);
+    }
     close_snaps();
     g_p.ctl = -1;
     g_p.progress = 1;
