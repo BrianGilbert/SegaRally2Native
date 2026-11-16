@@ -287,6 +287,15 @@ private:
     Picture backdrop_, logo_, credit_;   // (backdrop_: always one, the drawn placeholder if no picture)
     void picture(const Picture& p, int x0, int y0, int x1, int y1, float anchor_x = 0.5f);   // covering the box, opaque
     void sprite(const Picture& p, int x0, int y0, int w, int h);      // with its transparency
+    // The WHEEL tab's pictures (res/wheel/): each with its halvings, so any size
+    // stays smooth; empty when missing (the drawn ones then)
+    struct Pictures { std::vector<Picture> mip; bool ok() const { return !mip.empty() && mip[0].w > 0; } };
+    struct WheelArt { Pictures wheel, gas, brake, handbrake, handbrake_base; bool loaded = false; } wheel_art_;
+    const WheelArt& wheel_art();
+    // A picture w x h with its point (pu, pv) (0..1 of it) at (cx, cy), turned deg
+    // (clockwise), alpha; tint: from tint_v down (0..1 of it), its colours towards rgb
+    void sprite_turned(const Pictures& p, float cx, float cy, float w, float h, float pu, float pv, float deg,
+                       float alpha, uint32_t tint = 0, float tint_v = 2.0f, float tint_amount = 0.0f);
     // The gamepad's buttons in the key help (res/pad/<button>.png, CC0); w = 0:
     // none, a drawn disc or pill instead
     std::map<std::wstring, Picture> pad_icons_;

@@ -1954,6 +1954,93 @@ void Frontend::sprite(const Picture& p, int x0, int y0, int w, int h) {
         }
 }
 
+const Frontend::WheelArt& Frontend::wheel_art() {
+    if (wheel_art_.loaded) return wheel_art_;
+    wheel_art_.loaded = true;
+    auto load = [&](const wchar_t* name, Pictures& out) {
+        Picture p;
+        if (!load_image(std::wstring(L"res/wheel/") + name, p.px, p.w, p.h)) return;
+        out.mip.push_back(std::move(p));
+        while (out.mip.back().w >= 32 && out.mip.back().h >= 32) {   // halvings, alpha-weighted
+            const Picture& a = out.mip.back();
+            Picture h;
+            h.w = a.w / 2;
+            h.h = a.h / 2;
+            h.px.resize(size_t(h.w) * h.h);
+            for (int y = 0; y < h.h; y++)
+                for (int x = 0; x < h.w; x++) {
+                    float rgb[3] = {0, 0, 0}, al = 0;
+                    for (int k = 0; k < 4; k++) {
+                        uint32_t c = a.px[size_t(2 * y + k / 2) * a.w + 2 * x + k % 2];
+                        float ca = chan(c, 24);
+                        for (int m = 0; m < 3; m++) rgb[m] += chan(c, 16 - 8 * m) * ca;
+                        al += ca;
+                    }
+                    uint32_t c = uint32_t(al / 4 * 255.0f + 0.5f) << 24;
+                    if (al > 0)
+                        for (int m = 0; m < 3; m++) c |= uint32_t(std::clamp(rgb[m] / al, 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * m);
+                    h.px[size_t(y) * h.w + x] = c;
+                }
+            out.mip.push_back(std::move(h));
+        }
+    };
+    load(L"wheel.png", wheel_art_.wheel);
+    load(L"gas.png", wheel_art_.gas);
+    load(L"brake.png", wheel_art_.brake);
+    load(L"handbrake.png", wheel_art_.handbrake);
+    load(L"handbrake_base.png", wheel_art_.handbrake_base);
+    printf("[menu] wheel pictures: %s\n", wheel_art_.wheel.ok() && wheel_art_.gas.ok() && wheel_art_.brake.ok() &&
+                                               wheel_art_.handbrake.ok() && wheel_art_.handbrake_base.ok()
+                                           ? "res/wheel/"
+                                           : "some missing, drawn instead");
+    return wheel_art_;
+}
+
+void Frontend::sprite_turned(const Pictures& pics, float cx, float cy, float w, float h, float pu, float pv, float deg,
+                             float alpha, uint32_t tint, float tint_v, float tint_amount) {
+    if (!pics.ok() || w < 1 || h < 1 || alpha <= 0) return;
+    size_t lv = 0;   // the smallest halving still at least the size drawn
+    while (lv + 1 < pics.mip.size() && pics.mip[lv + 1].w >= w && pics.mip[lv + 1].h >= h) lv++;
+    const Picture& p = pics.mip[lv];
+    const float a = deg * 3.14159265f / 180.0f, cs = std::cos(a), sn = std::sin(a);
+    // The box it covers: its corners turned about (cx, cy)
+    float minx = 1e9f, miny = 1e9f, maxx = -1e9f, maxy = -1e9f;
+    for (int k = 0; k < 4; k++) {
+        float lx = ((k & 1) - pu) * w, ly = ((k >> 1) - pv) * h;
+        float X = cx + lx * cs - ly * sn, Y = cy + lx * sn + ly * cs;
+        minx = std::min(minx, X), maxx = std::max(maxx, X), miny = std::min(miny, Y), maxy = std::max(maxy, Y);
+    }
+    const float tr = chan(tint, 16), tg = chan(tint, 8), tb = chan(tint, 0);
+    for (int y = std::max(0, int(miny)); y < std::min(h_, int(maxy) + 2); y++)
+        for (int x = std::max(0, int(minx)); x < std::min(w_, int(maxx) + 2); x++) {
+            float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
+            float fu = (dx * cs + dy * sn) / w + pu, fv = (-dx * sn + dy * cs) / h + pv;   // 0..1 of the picture
+            if (fu < 0 || fu >= 1 || fv < 0 || fv >= 1) continue;
+            float u = std::clamp(fu * p.w - 0.5f, 0.0f, p.w - 1.001f), v = std::clamp(fv * p.h - 0.5f, 0.0f, p.h - 1.001f);
+            int iu = int(u), iv = int(v);
+            float ku = u - iu, kv = v - iv;
+            const uint32_t* q = &p.px[size_t(iv) * p.w + iu];
+            const uint32_t c4[4] = {q[0], q[1], q[p.w], q[p.w + 1]};
+            const float wt[4] = {(1 - ku) * (1 - kv), ku * (1 - kv), (1 - ku) * kv, ku * kv};
+            float rgb[3] = {0, 0, 0}, al = 0;   // (weighted by alpha: no dark fringes)
+            for (int k = 0; k < 4; k++) {
+                float ca = chan(c4[k], 24) * wt[k];
+                for (int m = 0; m < 3; m++) rgb[m] += chan(c4[k], 16 - 8 * m) * ca;
+                al += ca;
+            }
+            if (al <= 0.002f) continue;
+            for (float& c : rgb) c /= al;
+            if (tint_amount > 0 && fv >= tint_v) {   // towards the colour, keeping its shading
+                float l = 0.3f * rgb[0] + 0.59f * rgb[1] + 0.11f * rgb[2], k = 0.35f + 0.9f * l;
+                const float t[3] = {tr, tg, tb};
+                for (int m = 0; m < 3; m++) rgb[m] += (std::min(1.0f, t[m] * k) - rgb[m]) * tint_amount;
+            }
+            uint32_t c = 0;
+            for (int m = 0; m < 3; m++) c |= uint32_t(std::clamp(rgb[m], 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * m);
+            blend(x, y, c, al * alpha);
+        }
+}
+
 const Frontend::Picture& Frontend::pad_icon(const std::wstring& button) {
     auto it = pad_icons_.find(button);
     if (it != pad_icons_.end()) return it->second;
@@ -2607,6 +2694,11 @@ void Frontend::aa_arc(float cx, float cy, float r, float half, float a0, float a
 
 // A steering wheel: rim, three spokes, the hub and the red mark at the top, turned deg (right +)
 void Frontend::draw_wheel_icon(float cx, float cy, float r, float deg, float dim) {
+    if (const WheelArt& art = wheel_art(); art.wheel.ok()) {   // res/wheel/wheel.png: its rim's outside 228 of its 256
+        float d = r * 2.0f * 256.0f / 228.0f;
+        sprite_turned(art.wheel, cx, cy, d, d, 0.5f, 0.5f, deg, dim);
+        return;
+    }
     const float a = deg * 3.14159265f / 180.0f, rim = r * 0.13f;
     auto at = [&](float ang, float rad, float& ox, float& oy) {   // ang 0 = up, clockwise
         ox = cx + std::sin(ang + a) * rad;
@@ -2650,6 +2742,27 @@ int Frontend::draw_wheel_live(int x, int inner, int y_bottom) {
     const int px0 = x + inner - pedals_w, ptop = y_top + U(24), pbot = y_bottom - label_h;
     struct Pedal { const wchar_t* name; float v; uint32_t c; };
     const Pedal pedals[3] = {{L"HAND", lv.handbrake, 0xF5C400}, {L"BRAKE", lv.brake, SABER}, {L"GAS", lv.gas, 0x4CC264}};
+    const WheelArt& art = wheel_art();
+    if (art.gas.ok() && art.brake.ok() && art.handbrake.ok() && art.handbrake_base.ok()) {   // the pictures
+        const float ph = float(std::min(pbot - ptop - U(4), (bar_w + bar_gap) * 2 + U(10))), pw = ph / 2;
+        for (int i = 0; i < 3; i++) {
+            const float v = std::clamp(pedals[i].v, 0.0f, 1.0f), mx = float(px0 + i * (bar_w + bar_gap) + bar_w / 2);
+            const float top = float(pbot) - ph - U(2);
+            if (i == 0) {   // the lever back about its pivot, yellow when pulled
+                sprite_turned(art.handbrake_base, mx, top + ph / 2, pw, ph, 0.5f, 0.5f, 0, dim);
+                sprite_turned(art.handbrake, mx, top + ph * 0.875f, pw, ph, 0.5f, 0.875f, -28.0f * v, dim, pedals[i].c, 0.0f,
+                              v > 0.5f ? 0.45f : 0.0f);
+            } else {   // down a little, the plate filling with its colour (gas.png's plate 110..382 of 400, brake.png's 200..372)
+                const float p0 = i == 1 ? 0.5f : 0.275f, p1 = i == 1 ? 0.93f : 0.955f;
+                sprite_turned(i == 1 ? art.brake : art.gas, mx, top + ph / 2 + v * U(6), pw, ph, 0.5f, 0.5f, 0, dim,
+                              pedals[i].c, v > 0.005f ? p1 - (p1 - p0) * v : 2.0f, 0.6f);
+            }
+            int pct = int(std::lround(v * 100));
+            text(MONO, U(16), std::to_wstring(pct), int(mx), ptop - U(22), 1, {0xD6DEEA, 0xD6DEEA});
+            text(ROW_MEDIUM, U(18), pedals[i].name, int(mx), y_bottom - U(22), 1, {PAGE_DIM, PAGE_DIM});
+        }
+        return y_top - U(24);
+    }
     for (int i = 0; i < 3; i++) {
         int bx0 = px0 + i * (bar_w + bar_gap), bx1 = bx0 + bar_w;
         int fy = pbot - int(float(pbot - ptop) * std::clamp(pedals[i].v, 0.0f, 1.0f) + 0.5f);
@@ -2733,6 +2846,15 @@ void Frontend::draw_wheel_prompt() {
         break;
     }
     case 3: {   // PEDAL: the plate going down, filling as the real one moves
+        if (const WheelArt& art = wheel_art(); art.gas.ok() && art.brake.ok()) {
+            const bool gas = p.glyph == L"GAS";
+            const float h = R * 2.3f, p0 = gas ? 0.275f : 0.5f, p1 = gas ? 0.955f : 0.93f;
+            sprite_turned(gas ? art.gas : art.brake, icx, icy - R * 0.1f + loop(ph) * R * 0.12f, h / 2, h, 0.5f, 0.5f, 0, 1,
+                          gas ? 0x4CC264 : SABER, p.progress > 0.005f ? p1 - (p1 - p0) * p.progress : 2.0f, 0.6f);
+            triangle(int(icx), int(icy - h * 0.55f) + int(loop(ph) * Uf(12)), U(26), 2, GOLD_BOTTOM, 0.95f);
+            text(ROW_MEDIUM, U(22), p.glyph, int(icx), int(icy + R * 1.2f), 1, {PAGE_TEXT, PAGE_TEXT});
+            break;
+        }
         float pw = R * 0.85f, phh = R * 1.55f, top = icy - phh / 2 + loop(ph) * R * 0.18f;
         int l = int(icx - pw / 2), r = int(icx + pw / 2), tp = int(top), bt = int(top + phh);
         fill(l, tp, r, bt, 0x2A3240, 1);
@@ -2746,6 +2868,12 @@ void Frontend::draw_wheel_prompt() {
         break;
     }
     case 4: {   // HAND_BRAKE: the lever pulled up and back
+        if (const WheelArt& art = wheel_art(); art.handbrake.ok() && art.handbrake_base.ok()) {
+            const float h = R * 2.3f, pvx = icx, pvy = icy - R * 0.1f + h * 0.375f;
+            sprite_turned(art.handbrake_base, icx, icy - R * 0.1f, h / 2, h, 0.5f, 0.5f, 0, 1);
+            sprite_turned(art.handbrake, pvx, pvy, h / 2, h, 0.5f, 0.875f, -28.0f * loop(ph), 1, 0xF5C400, 0.0f, 0.45f * p.progress);
+            break;
+        }
         float pvx = icx + R * 0.5f, pvy = icy + R * 0.75f, len = R * 1.45f;
         float a = (-0.35f - loop(ph) * 0.55f);   // from upright-ish, back towards you
         float ex = pvx + std::sin(a) * len, ey = pvy - std::cos(a) * len;
