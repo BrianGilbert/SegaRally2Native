@@ -334,8 +334,27 @@ void stop_haptics(Wheel& w) {
     w.constant = w.spring = -1;
 }
 
+// Some wheels drop the effects after a while, a hard knock or a full turn
+// (direct drive bases: a Simagic in issue #33, a Thrustmaster T598 in #93),
+// and nothing starts them again: an update only changes the force of an
+// effect that is no longer playing, so the wheel stays loose until the game
+// restarts. As other recomps do, they are run again every second while
+// driving, even if the wheel says they still play, and at once when an
+// update fails
+void restart_haptics(Wheel& w) {
+    static bool logged = false;
+    bool ok = true;
+    if (w.constant >= 0) ok &= SDL_RunHapticEffect(w.haptic, w.constant, 1);
+    if (w.spring >= 0) ok &= SDL_RunHapticEffect(w.haptic, w.spring, 1);
+    if (!ok && !logged) {
+        printf("[wheel] force feedback: could not start the effects again (%s)\n", SDL_GetError());
+        logged = true;
+    }
+}
+
 void apply_force(Wheel& w) {
     float f = g_focused ? g_force.load() * g_cfg.ffb_strength * (g_cfg.ffb_invert ? -1.0f : 1.0f) : 0.0f;
+    bool restart = false;
     if (w.haptic && w.constant >= 0) {
         int16_t level = int16_t(std::clamp(f, -1.0f, 1.0f) * 32767.0f);
         if (std::abs(level - w.level) > 300 || (level == 0 && w.level != 0)) {
@@ -347,9 +366,25 @@ void apply_force(Wheel& w) {
             e.constant.length = SDL_HAPTIC_INFINITY;
             e.constant.level = level;
             Uint64 from = SDL_GetTicksNS();
-            SDL_UpdateHapticEffect(w.haptic, w.constant, &e);
+            if (SDL_UpdateHapticEffect(w.haptic, w.constant, &e)) {
+                w.level = level;
+            } else {   // tried again on the next poll, after the restart
+                static bool logged = false;
+                if (!logged) printf("[wheel] force feedback: an update failed (%s), starting the effects again\n", SDL_GetError());
+                logged = true;
+                restart = true;
+            }
             g_vibration_seconds += double(SDL_GetTicksNS() - from) * 1e-9;
-            w.level = level;
+        }
+    }
+    if (w.haptic && (w.constant >= 0 || w.spring >= 0)) {
+        static Uint64 next_restart = 0;
+        Uint64 now = SDL_GetTicksNS();
+        if (g_focused && now >= next_restart) restart = true;
+        if (restart) {
+            restart_haptics(w);
+            g_vibration_seconds += double(SDL_GetTicksNS() - now) * 1e-9;
+            next_restart = now + SDL_NS_PER_SECOND;
         }
     }
     float shake = g_shake.exchange(0.0f);
