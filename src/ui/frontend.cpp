@@ -2828,7 +2828,11 @@ void Frontend::draw_wheel_prompt() {
                 int lx = tx + (int(i) >= per ? colw + U(24) : 0), ly = ty + (int(i) % per) * lh;
                 fill(lx, ly + U(11), lx + U(7), ly + U(18), SABER, 1);
                 std::wstring line = p.lines[i];
-                while (line.size() > 4 && measure(BODY, lpx, line) > colw - U(20)) line = line.substr(0, line.size() - 2) + L".";
+                if (measure(BODY, lpx, line) > colw - U(20)) {   // too long: cut, with "..."
+                    while (line.size() > 4 && measure(BODY, lpx, line + L"...") > colw - U(20)) line.pop_back();
+                    while (!line.empty() && line.back() == L' ') line.pop_back();
+                    line += L"...";
+                }
                 text(BODY, lpx, line, lx + U(18), ly, 0, {PAGE_TEXT, PAGE_TEXT});
             }
         }

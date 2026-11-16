@@ -906,8 +906,7 @@ void enter_step(int step) {
     bool force_ok = g_wheel.joy && g_wheel.haptic && g_wheel.constant >= 0;
     if (step == ST_ROTATION && !(g_src[STEER] && g_src[STEER]->joy)) step++;   // no steering to measure
     if (step == ST_FORCE && !force_ok) {
-        g_p.summary.push_back(g_wheel.joy ? "FORCE FEEDBACK: the wheel gave the game no force effects"
-                                          : "FORCE FEEDBACK: no wheel to test");
+        g_p.summary.push_back(g_wheel.joy ? "FORCE FEEDBACK: NOT AVAILABLE ON THIS WHEEL" : "FORCE FEEDBACK: NO WHEEL TO TEST");
         step = ST_DONE;
     }
     g_p.step = step;
@@ -1240,7 +1239,10 @@ void wheel_prompt_choose(int choice) {
     if (!g_p.setup) return;
     switch (g_p.step) {
     case ST_INTRO: enter_step(ST_STEER); break;
-    case ST_GEAR1: enter_step(ST_VIEW); break;   // NO H SHIFTER: the four gears skipped
+    case ST_GEAR1:   // NO H SHIFTER: the four gears skipped
+        g_p.summary.push_back("H SHIFTER: NONE");
+        enter_step(ST_VIEW);
+        break;
     case ST_FORCE:
         force_test_off();
         enter_step(ST_DONE);
