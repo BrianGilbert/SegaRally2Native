@@ -434,6 +434,55 @@ void apply_force(Wheel& w) {
     }
 }
 
+// Tests without a wheel: SR2_FAKE_WHEEL=steer,gas,brake,hand[,at] plugs in an
+// SDL virtual wheel (axis 0 steering, 1 accelerator, 2 brake, button 1 hand
+// brake, as wheel.ini's defaults), pedals at rest, that goes to those values
+// (steering -1..1 of its axis, the rest 0..1) `at` seconds after the start (1)
+struct Fake {
+    SDL_JoystickID id = 0;
+    SDL_Joystick* joy = nullptr;
+    float v[4] = {};
+    double at = 1.0, from = 0;
+    bool moved = false;
+} g_fake;
+
+void fake_init() {
+    const char* e = std::getenv("SR2_FAKE_WHEEL");
+    if (!e || !*e) return;
+    Fake& f = g_fake;
+    std::sscanf(e, "%f,%f,%f,%f,%lf", &f.v[0], &f.v[1], &f.v[2], &f.v[3], &f.at);
+    SDL_VirtualJoystickDesc d;
+    SDL_INIT_INTERFACE(&d);
+    d.type = SDL_JOYSTICK_TYPE_WHEEL;
+    d.naxes = 3;
+    d.nbuttons = 12;
+    d.nhats = 1;
+    d.name = "SR2 Test Wheel";
+    f.id = SDL_AttachVirtualJoystick(&d);
+    f.joy = f.id ? SDL_OpenJoystick(f.id) : nullptr;
+    if (!f.joy) {
+        printf("[wheel] SR2_FAKE_WHEEL: no virtual wheel (%s)\n", SDL_GetError());
+        return;
+    }
+    SDL_SetJoystickVirtualAxis(f.joy, 1, -32768);   // the pedals let go
+    SDL_SetJoystickVirtualAxis(f.joy, 2, -32768);
+    f.from = double(SDL_GetTicksNS()) * 1e-9;
+    printf("[wheel] SR2_FAKE_WHEEL: virtual wheel plugged in, moving in %.1f s\n", f.at);
+}
+
+void fake_poll() {
+    Fake& f = g_fake;
+    if (!f.joy || f.moved || double(SDL_GetTicksNS()) * 1e-9 - f.from < f.at) return;
+    f.moved = true;
+    auto pedal_raw = [](float t) { return int16_t(std::clamp(-32768.0f + std::clamp(t, 0.0f, 1.0f) * 65535.0f, -32768.0f, 32767.0f)); };
+    SDL_SetJoystickVirtualAxis(f.joy, 0, int16_t(std::clamp(f.v[0], -1.0f, 1.0f) * 32767.0f));
+    SDL_SetJoystickVirtualAxis(f.joy, 1, pedal_raw(f.v[1]));
+    SDL_SetJoystickVirtualAxis(f.joy, 2, pedal_raw(f.v[2]));
+    SDL_SetJoystickVirtualButton(f.joy, 1, f.v[3] >= 0.5f);
+    printf("[wheel] SR2_FAKE_WHEEL: steering %.2f, gas %.2f, brake %.2f, hand brake %s\n", f.v[0], f.v[1], f.v[2],
+           f.v[3] >= 0.5f ? "on" : "off");
+}
+
 }  // namespace
 
 void wheels_init() {
@@ -444,6 +493,7 @@ void wheels_init() {
     g_ok = true;   // the wheels already plugged in arrive as SDL_EVENT_JOYSTICK_ADDED
     g_cfg = read_ini(false);   // for OPTIONS > WHEEL before any wheel arrives (written once one does, or a row changes)
     for (Wheel*& s : g_src) s = &g_none;
+    fake_init();
 }
 
 bool wheel_is_ours(uint32_t id) {
@@ -882,6 +932,7 @@ void wheels_poll(bool focused, bool menu, std::vector<PadKey>& keys) {
     bool driving = focused && !menu;
     menu = focused && menu;
     g_focused = driving;
+    fake_poll();
     listen_poll();
     Wheel& w = g_wheel;
     WheelState& st = g_state;
@@ -1039,6 +1090,11 @@ void wheels_shutdown() {
     for (Wheel& d : g_devices)
         if (d.joy) wheels_removed(d.id);
     if (g_wheel.joy) wheels_removed(g_wheel.id);
+    if (g_fake.joy) {
+        SDL_CloseJoystick(g_fake.joy);
+        SDL_DetachVirtualJoystick(g_fake.id);
+        g_fake = Fake{};
+    }
     g_ok = false;
 }
 
