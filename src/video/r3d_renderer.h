@@ -27,14 +27,15 @@
 // in the middle of it.
 struct ScreenLayout {
     float view_w;    // width of the 3D view in Model 3 pixels (496 = original 4:3)
-    float scale;     // window pixels per Model 3 pixel
+    float scale;     // window pixels per Model 3 pixel (up and down; across, times px_aspect)
+    float px_aspect; // how much wider than tall a Model 3 pixel is shown (1, or 1.032: the cabinet's 4:3)
     float ox, oy;    // window position of the 3D view
     float game_x0;   // Model 3 x of the 4:3 area inside the 3D view
     float hud_x;     // how far the race HUD's corners move out of the 4:3 area: to the
                      // view's edges, but no further than a 16:9 view's (ultrawide screens)
 };
 // max_aspect <= 4/3 keeps the original 4:3 picture
-ScreenLayout compute_layout(float win_w, float win_h, float max_aspect);
+ScreenLayout compute_layout(float win_w, float win_h, float max_aspect, float px_aspect = 1.0f);
 
 class R3DRenderer {
 public:
@@ -84,6 +85,7 @@ public:
 
     void record(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent);
     void set_max_aspect(float aspect) { max_aspect_ = aspect; }
+    void set_pixel_aspect(float a) { px_aspect_ = a; }   // Options::pixel_aspect
     // true: 2D layers upscaled with xBR; false: plain square pixels
     void set_smooth_2d(bool smooth) { smooth_2d_ = smooth; }
     // true: HUD elements at the sides go to the edges of a widescreen window
@@ -335,6 +337,7 @@ private:
     VkPipeline alpha_taa_ = VK_NULL_HANDLE;
     VkFormat compose_format_ = VK_FORMAT_UNDEFINED;
     float max_aspect_ = 16.0f / 9.0f;
+    float px_aspect_ = 1.0f;
     bool smooth_2d_ = true;
     bool hud_edges_ = true, hud_band_ = true;
     float interp_ = 1.0f;

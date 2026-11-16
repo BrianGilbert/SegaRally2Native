@@ -53,6 +53,12 @@ int main() {
                         "100,200", "--msaa", "8", "--scale", "1.5", "--volume", "3", "--wav", "out/a.wav", "--data",
                         "roms"}));
         CHECK(o.dlaa && o.msaa == 8 && near(o.max_aspect, 21.0f / 9.0f));
+        // --aspect keeps square pixels whatever ASPECT (settings.ini) gave; the operator
+        // settings and the experience stay as the EEPROM says unless the menu sets them
+        Options a;
+        a.pixel_aspect = 1.032f;
+        CHECK(parse(a, {"--aspect", "4:3"}) && near(a.pixel_aspect, 1.0f) && near(a.max_aspect, 4.0f / 3.0f));
+        CHECK(a.game_mode == -1 && a.default_view == -1 && a.speed_kmh == -1 && a.free_play == -1 && !a.arcade);
         CHECK(o.fixed_aim && o.aim_x == 100 && o.aim_y == 200 && near(o.supersample, 1.5f) && near(o.volume, 3));
         CHECK(o.wav_path == "out/a.wav" && o.data_dir == "roms");
         Options r;
