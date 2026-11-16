@@ -85,8 +85,12 @@ its own settings. Its pause menu goes back to PC EDITION.
 
 **Steering wheels (experimental)** are read through SDL, DirectInput included, with force feedback.
 Players report it working on Logitech, Thrustmaster, Fanatec, Moza and Simucube bases; I have no wheel,
-so I can't test them myself. The settings are in `save\wheel.ini`, and `set SR2_WHEEL_LOG=1`
-prints every axis and button you move. If yours gives trouble, please open an issue with that log.
+so I can't test them myself. **OPTIONS > WHEEL** sets each control by moving it (pedals, shifter or hand
+brake on their own USB device too), plus force feedback, rotation and dead zone; the wheel and pedals
+are drawn live there. Everything is saved in `save\wheel.ini`, and `set SR2_WHEEL_LOG=1` prints every
+axis and button you move. If yours gives trouble, please open an issue with that log.
+
+<img src="docs/img/wheel.jpg" alt="OPTIONS > WHEEL: controls, force feedback and the wheel and pedals drawn live" width="100%">
 
 ## Performance
 
