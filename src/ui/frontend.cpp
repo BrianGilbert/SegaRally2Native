@@ -2744,17 +2744,17 @@ int Frontend::draw_wheel_live(int x, int inner, int y_bottom) {
     const Pedal pedals[3] = {{L"HAND", lv.handbrake, 0xF5C400}, {L"BRAKE", lv.brake, SABER}, {L"GAS", lv.gas, 0x4CC264}};
     const WheelArt& art = wheel_art();
     if (art.gas.ok() && art.brake.ok() && art.handbrake.ok() && art.handbrake_base.ok()) {   // the pictures
-        const float ph = float(std::min(pbot - ptop - U(4), (bar_w + bar_gap) * 2 + U(10))), pw = ph / 2;
+        const float ph = float(pbot - ptop - U(4)), pw = ph / 2;   // (their plates fit the columns)
         for (int i = 0; i < 3; i++) {
             const float v = std::clamp(pedals[i].v, 0.0f, 1.0f), mx = float(px0 + i * (bar_w + bar_gap) + bar_w / 2);
             const float top = float(pbot) - ph - U(2);
-            if (i == 0) {   // the lever back about its pivot, yellow when pulled
+            if (i == 0) {   // the lever back about its pivot, its shaft yellow when pulled (not the grip, 0..0.43)
                 sprite_turned(art.handbrake_base, mx, top + ph / 2, pw, ph, 0.5f, 0.5f, 0, dim);
-                sprite_turned(art.handbrake, mx, top + ph * 0.875f, pw, ph, 0.5f, 0.875f, -28.0f * v, dim, pedals[i].c, 0.0f,
+                sprite_turned(art.handbrake, mx, top + ph * 0.875f, pw, ph, 0.5f, 0.875f, -28.0f * v, dim, pedals[i].c, 0.43f,
                               v > 0.5f ? 0.45f : 0.0f);
             } else {   // down a little, the plate filling with its colour (gas.png's plate 110..382 of 400, brake.png's 200..372)
                 const float p0 = i == 1 ? 0.5f : 0.275f, p1 = i == 1 ? 0.93f : 0.955f;
-                sprite_turned(i == 1 ? art.brake : art.gas, mx, top + ph / 2 + v * U(6), pw, ph, 0.5f, 0.5f, 0, dim,
+                sprite_turned(i == 1 ? art.brake : art.gas, mx, top + ph / 2 + v * U(10), pw, ph, 0.5f, 0.5f, 0, dim,
                               pedals[i].c, v > 0.005f ? p1 - (p1 - p0) * v : 2.0f, 0.6f);
             }
             int pct = int(std::lround(v * 100));
@@ -2871,7 +2871,7 @@ void Frontend::draw_wheel_prompt() {
         if (const WheelArt& art = wheel_art(); art.handbrake.ok() && art.handbrake_base.ok()) {
             const float h = R * 2.3f, pvx = icx, pvy = icy - R * 0.1f + h * 0.375f;
             sprite_turned(art.handbrake_base, icx, icy - R * 0.1f, h / 2, h, 0.5f, 0.5f, 0, 1);
-            sprite_turned(art.handbrake, pvx, pvy, h / 2, h, 0.5f, 0.875f, -28.0f * loop(ph), 1, 0xF5C400, 0.0f, 0.45f * p.progress);
+            sprite_turned(art.handbrake, pvx, pvy, h / 2, h, 0.5f, 0.875f, -28.0f * loop(ph), 1, 0xF5C400, 0.43f, 0.45f * p.progress);
             break;
         }
         float pvx = icx + R * 0.5f, pvy = icy + R * 0.75f, len = R * 1.45f;
