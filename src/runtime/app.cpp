@@ -1454,15 +1454,30 @@ int main(int argc, char** argv) {
             frontend.gamepads = names;
             frontend.invalidate();
         }
-        {   // CONTROLS > WHEEL: its rows as wheel.cpp has them now (a control listening, a new setting)
+        {   // OPTIONS > WHEEL: its rows as wheel.cpp has them now (a control listening, a new setting)
             if (wheel_listening() && !frontend.active()) wheel_listen_cancel();
             std::vector<Frontend::WheelLine> lines;
-            auto wide = [](const std::string& t) { return std::wstring(t.begin(), t.end()); };
-            for (const WheelRow& r : wheel_rows()) lines.push_back({wide(r.label), wide(r.value), wide(r.hint)});
+            auto wide = [](const std::string& t) {   // (Latin-1: the degree sign)
+                std::wstring w;
+                for (char c : t) w += wchar_t((unsigned char)c);
+                return w;
+            };
+            for (const WheelRow& r : wheel_rows())
+                lines.push_back({wide(r.group), wide(r.label), wide(r.value), wide(r.hint), r.fill});
             if (lines != frontend.wheel_lines || wheel_listening() != frontend.wheel_listening) {
                 frontend.wheel_lines = lines;
                 frontend.wheel_listening = wheel_listening();
                 frontend.invalidate();
+            }
+            // The WHEEL tab's drawing follows the wheel and the pedals
+            const WheelLive& lv = wheel_live();
+            Frontend::WheelLive& shown = frontend.wheel_live;
+            bool moved = lv.on != shown.on || lv.gear != shown.gear || std::fabs(lv.steer - shown.steer) > 0.004f ||
+                         std::fabs(lv.gas - shown.gas) > 0.01f || std::fabs(lv.brake - shown.brake) > 0.01f ||
+                         std::fabs(lv.handbrake - shown.handbrake) > 0.01f;
+            if (moved) {
+                shown = {lv.on, lv.steer, lv.gas, lv.brake, lv.handbrake, lv.gear};
+                if (frontend.showing_wheel()) frontend.invalidate();
             }
         }
         for (PadKey k : g_pads.take_keys()) {   // the menus, as keys (START resumes from the pause menu)

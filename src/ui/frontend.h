@@ -108,7 +108,7 @@ public:
     enum class Screen { None, Splash, Main, Options, Pause, Records, Debug, Play };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
                         QuitToMenu, StartDebug, DisplayChanged, Restart,
-                        WheelRow, WheelCancel };   // WheelRow: CONTROLS > WHEEL row wheel_row, with wheel_dir   // Restart: RESTART NOW   // DisplayChanged: MODE / RESOLUTION to the window
+                        WheelRow, WheelCancel };   // WheelRow: WHEEL tab row wheel_row, with wheel_dir   // Restart: RESTART NOW   // DisplayChanged: MODE / RESOLUTION to the window
 
     bool init(const std::string& font_dir);
     void shutdown();
@@ -152,10 +152,19 @@ public:
     // row gives WheelRow with its number and direction; while a control listens
     // for the wheel, Esc / BACK gives WheelCancel instead of leaving
     struct WheelLine {
-        std::wstring label, value, hint;
-        bool operator==(const WheelLine& o) const { return label == o.label && value == o.value && hint == o.hint; }
+        std::wstring group, label, value, hint;   // group: its heading (CONTROLS, FORCE FEEDBACK, ADVANCED)
+        float fill = -1;                          // a setting's bar 0..1, -1 none
+        bool operator==(const WheelLine& o) const {
+            return group == o.group && label == o.label && value == o.value && hint == o.hint && fill == o.fill;
+        }
     };
     std::vector<WheelLine> wheel_lines;
+    struct WheelLive {   // the wheel and pedals now, drawn in the WHEEL tab's panel
+        bool on = false;
+        float steer = 0, gas = 0, brake = 0, handbrake = 0;   // -1..1, 0..1
+        int gear = -1;                                        // H shifter: -1 none, 0 neutral
+    } wheel_live;
+    bool showing_wheel() const { return screen_ == Screen::Options && tab_ == WHEEL_TAB; }
     bool wheel_listening = false;
     int wheel_row = -1, wheel_dir = 0;
     bool pad_prompts = false;   // a gamepad drives the menu: its buttons in the key help and hints, not the keyboard's
@@ -394,8 +403,8 @@ private:
     bool wrap_ = false;
     // Settings sections (tab_of in frontend.cpp says where each option goes),
     // shown as a column at the left of the settings page
-    enum { EXPERIENCE_TAB, DISPLAY_TAB, LIGHTING_TAB, AUDIO_TAB, CONTROLS_TAB };   // LIGHTING_TAB is shown as GRAPHICS
-    static constexpr int TAB_COUNT = 5;
+    enum { EXPERIENCE_TAB, DISPLAY_TAB, LIGHTING_TAB, AUDIO_TAB, CONTROLS_TAB, WHEEL_TAB };   // LIGHTING_TAB is shown as GRAPHICS
+    static constexpr int TAB_COUNT = 6;
     static const wchar_t* const TAB_NAMES[TAB_COUNT];
     static int tab_of(Id id);
     struct OptionTab {
@@ -425,6 +434,9 @@ private:
     // The settings page (Options, also from the pause menu): the sections in a
     // column at the left, the open one's options in groups in the middle, what
     // the chosen one does in a panel at the right, the key help at the bottom
+    const std::wstring& wheel_group(int i) const;   // WHEEL tab: wheel_lines[i]'s heading, fill
+    float wheel_fill(int i) const;
+    int draw_wheel_live(int x, int inner, int y_bottom);   // its panel's drawing; returns its top
     void draw_options_page(const std::vector<Item>& list, bool over_game);
     RECT more_up_{}, more_down_{};   // clickable "more" arrows of a scrolled tab
     std::vector<RECT> tab_rects_;   // a step past the end starts again (clicks on the label)

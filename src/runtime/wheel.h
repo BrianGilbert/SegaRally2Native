@@ -50,18 +50,29 @@ void wheels_shutdown();
 
 const WheelState& wheel_state();
 
-// OPTIONS > CONTROLS > WHEEL: one row per control (STEERING, ACCELERATOR...,
+// OPTIONS > WHEEL: one row per control (STEERING, ACCELERATOR...,
 // each showing its axis or button and device) and the force feedback and
 // rotation settings. Choosing a control's row listens to every joystick until
 // one moves, and that becomes the control, saved in wheel.ini; Left / Right
 // change the two settings
 struct WheelRow {
+    std::string group;        // the heading it is under: CONTROLS, FORCE FEEDBACK, ADVANCED
     std::string label, value, hint;
+    float fill = -1;          // a setting's bar, 0..1 (-1: none)
 };
 std::vector<WheelRow> wheel_rows();
 void wheel_row_input(int row, int dir);   // a control's row: listen; a setting's: change it by dir
 bool wheel_listening();
 void wheel_listen_cancel();
+// The wheel as it is now, in the menus too (WheelState gives the game nothing
+// there): the WHEEL tab's drawing of the wheel and the pedals
+struct WheelLive {
+    bool on = false;          // a wheel is plugged in
+    float steer = 0;          // -1..1, as the game gets it (rotation and dead zone)
+    float gas = 0, brake = 0, handbrake = 0;   // 0..1
+    int gear = -1;            // H shifter: -1 none, 0 neutral, 1..4
+};
+const WheelLive& wheel_live();
 // Force feedback from the game's drive board: `force` -1..1 (the motor, 0 =
 // none; the sign as the board drives it), `shake` 0..1 (sudden changes)
 void wheel_set_force(float force, float shake);

@@ -91,7 +91,7 @@ void write_ini(const Config& c) {
         else fprintf(f, "%s = %d\n", key, v);
     };
     fprintf(f,
-            "; Sega Rally 2 Native: steering wheel settings. OPTIONS > CONTROLS > WHEEL sets them:\n"
+            "; Sega Rally 2 Native: steering wheel settings. OPTIONS > WHEEL sets them:\n"
             "; choose a control and move it. They can be edited here too.\n"
             "; Numbers of axes and buttons are SDL's, counted from 0 (-1 = not used). Run the game\n"
             "; with SR2_WHEEL_LOG=1 (set SR2_WHEEL_LOG=1 in a command prompt, then SegaRally2.exe)\n"
@@ -235,6 +235,7 @@ Wheel g_devices[MAX_DEVICES];
 Wheel g_none;                 // a device named in wheel.ini but not plugged in: reads nothing
 Wheel* g_src[CTL_COUNT] = {};  // where each control is read (resolve)
 int g_last_gear = -2;         // the H shifter's position at the last poll
+WheelLive g_live;             // wheel_live()
 WheelState g_state;
 std::atomic<float> g_force{0}, g_shake{0};   // from the game thread (runtime.cpp ffb_frame)
 bool g_focused = false;
@@ -315,6 +316,27 @@ float pedal(const Wheel& w, int a) {
     return t < 0.03f ? 0.0f : (t - 0.03f) / 0.97f;
 }
 
+// The centring spring as ffb_spring has it (none at 0): made again when
+// CENTRING SPRING changes, so it is felt at once
+void make_spring(Wheel& w) {
+    if (!w.haptic) return;
+    if (w.spring >= 0) SDL_DestroyHapticEffect(w.haptic, w.spring);
+    w.spring = -1;
+    if (!(SDL_GetHapticFeatures(w.haptic) & SDL_HAPTIC_SPRING) || g_cfg.ffb_spring <= 0) return;
+    SDL_HapticEffect e;
+    SDL_zero(e);
+    e.type = SDL_HAPTIC_SPRING;
+    e.condition.direction.type = SDL_HAPTIC_CARTESIAN;
+    e.condition.direction.dir[0] = 1;
+    e.condition.length = SDL_HAPTIC_INFINITY;
+    uint16_t sat = uint16_t(0xFFFF * g_cfg.ffb_spring);
+    int16_t coeff = int16_t(0x7FFF * g_cfg.ffb_spring);
+    e.condition.right_sat[0] = e.condition.left_sat[0] = sat;
+    e.condition.right_coeff[0] = e.condition.left_coeff[0] = coeff;
+    w.spring = SDL_CreateHapticEffect(w.haptic, &e);
+    if (w.spring >= 0) SDL_RunHapticEffect(w.haptic, w.spring, 1);
+}
+
 void start_haptics(Wheel& w) {
     w.haptic = SDL_OpenHapticFromJoystick(w.joy);
     if (!w.haptic) {
@@ -336,20 +358,7 @@ void start_haptics(Wheel& w) {
         w.constant = SDL_CreateHapticEffect(w.haptic, &e);
         if (w.constant >= 0) SDL_RunHapticEffect(w.haptic, w.constant, 1);
     }
-    if ((f & SDL_HAPTIC_SPRING) && g_cfg.ffb_spring > 0) {
-        SDL_HapticEffect e;
-        SDL_zero(e);
-        e.type = SDL_HAPTIC_SPRING;
-        e.condition.direction.type = SDL_HAPTIC_CARTESIAN;
-        e.condition.direction.dir[0] = 1;
-        e.condition.length = SDL_HAPTIC_INFINITY;
-        uint16_t sat = uint16_t(0xFFFF * g_cfg.ffb_spring);
-        int16_t coeff = int16_t(0x7FFF * g_cfg.ffb_spring);
-        e.condition.right_sat[0] = e.condition.left_sat[0] = sat;
-        e.condition.right_coeff[0] = e.condition.left_coeff[0] = coeff;
-        w.spring = SDL_CreateHapticEffect(w.haptic, &e);
-        if (w.spring >= 0) SDL_RunHapticEffect(w.haptic, w.spring, 1);
-    }
+    make_spring(w);
     if (w.constant < 0 && w.spring < 0) w.rumble = true;
     printf("[wheel] force feedback: %s%s%s\n", w.constant >= 0 ? "constant force " : "", w.spring >= 0 ? "spring " : "",
            w.rumble ? "rumble" : "");
@@ -433,7 +442,7 @@ void wheels_init() {
         return;
     }
     g_ok = true;   // the wheels already plugged in arrive as SDL_EVENT_JOYSTICK_ADDED
-    g_cfg = read_ini(false);   // for CONTROLS > WHEEL before any wheel arrives (written once one does, or a row changes)
+    g_cfg = read_ini(false);   // for OPTIONS > WHEEL before any wheel arrives (written once one does, or a row changes)
     for (Wheel*& s : g_src) s = &g_none;
 }
 
@@ -517,7 +526,7 @@ static void set_rests() {
 
 static void not_used(SDL_Joystick* j) {
     const char* name = SDL_GetJoystickName(j);
-    printf("[wheel] %s not used (if you use it in the car, set its controls in OPTIONS > CONTROLS > WHEEL)\n",
+    printf("[wheel] %s not used (if you use it in the car, set its controls in OPTIONS > WHEEL)\n",
            name ? name : "?");
 }
 
@@ -620,7 +629,7 @@ void wheels_removed(uint32_t id) {
     resolve();
 }
 
-// After the settings change (CONTROLS > WHEEL): every joystick taken again
+// After the settings change (OPTIONS > WHEEL): every joystick taken again
 // as they now say
 static void reopen_all() {
     for (Wheel& d : g_devices) {
@@ -635,21 +644,28 @@ static void reopen_all() {
     resolve();
 }
 
-// ---- CONTROLS > WHEEL: a control set by moving it ----
+// ---- OPTIONS > WHEEL: a control set by moving it ----
 
 namespace {
 
+// The settings after the controls (Row::ctl below 0)
+enum { SET_GAIN = -1, SET_SPRING = -2, SET_INVERT = -3, SET_ROTATION = -4, SET_DEAD = -5 };
 struct Row {
+    const char* group;
     const char* label;
-    int ctl;   // -1: not a control (the settings at the end)
+    int ctl;   // a control, or a SET_ setting
 };
-const Row ROWS[] = {{"STEERING", STEER},        {"ACCELERATOR", GAS},       {"BRAKE", BRAKE},
-                    {"HAND BRAKE", HANDBRAKE},  {"SHIFT UP", SHIFT_UP},     {"SHIFT DOWN", SHIFT_DOWN},
-                    {"GEAR 1", GEAR1},          {"GEAR 2", GEAR2},          {"GEAR 3", GEAR3},
-                    {"GEAR 4", GEAR4},          {"VIEW CHANGE", VIEW},      {"START", START},
-                    {"FORCE FEEDBACK", -1},     {"WHEEL ROTATION", -1}};
+constexpr const char* CONTROLS = "CONTROLS";
+constexpr const char* FFB = "FORCE FEEDBACK";
+constexpr const char* ADVANCED = "ADVANCED";
+const Row ROWS[] = {{CONTROLS, "STEERING", STEER},      {CONTROLS, "ACCELERATOR", GAS},   {CONTROLS, "BRAKE", BRAKE},
+                    {CONTROLS, "HAND BRAKE", HANDBRAKE}, {CONTROLS, "SHIFT UP", SHIFT_UP}, {CONTROLS, "SHIFT DOWN", SHIFT_DOWN},
+                    {CONTROLS, "GEAR 1", GEAR1},         {CONTROLS, "GEAR 2", GEAR2},      {CONTROLS, "GEAR 3", GEAR3},
+                    {CONTROLS, "GEAR 4", GEAR4},         {CONTROLS, "VIEW CHANGE", VIEW},  {CONTROLS, "START", START},
+                    {FFB, "GAIN", SET_GAIN},             {FFB, "CENTRING SPRING", SET_SPRING}, {FFB, "INVERT FORCES", SET_INVERT},
+                    {ADVANCED, "WHEEL ROTATION", SET_ROTATION}, {ADVANCED, "STEERING DEAD ZONE", SET_DEAD}};
 constexpr int ROW_COUNT = int(sizeof ROWS / sizeof ROWS[0]);
-constexpr int ROW_FFB = ROW_COUNT - 2, ROW_ROTATION = ROW_COUNT - 1;
+constexpr int MAX_DEAD = 20;   // STEERING DEAD ZONE: up to 20 %
 constexpr double SETTLE = 0.4, LISTEN_FOR = 10.0;
 
 // While a row listens: every joystick open (the ones not in use only for
@@ -753,6 +769,7 @@ std::vector<WheelRow> wheel_rows() {
     const Config& c = g_cfg;
     for (int r = 0; r < ROW_COUNT; r++) {
         WheelRow row;
+        row.group = ROWS[r].group;
         row.label = ROWS[r].label;
         int k = ROWS[r].ctl;
         if (r == g_none_row && now_s() < g_none_until) {
@@ -764,14 +781,28 @@ std::vector<WheelRow> wheel_rows() {
                        : k == HANDBRAKE ? "Pull the hand brake or press its button now (Esc cancels)"
                        : k == GAS || k == BRAKE ? "Press the pedal down now, from rest (Esc cancels)"
                                                 : "Press the button or move the lever now (Esc cancels)";
-        } else if (r == ROW_FFB) {
+        } else if (k == SET_GAIN) {
             row.value = c.ffb_strength > 0 ? std::to_string(int(std::lround(c.ffb_strength * 100))) + "%" : "OFF";
-            row.hint = "How hard the wheel pushes back: bumps, slides and the road";
-        } else if (r == ROW_ROTATION) {
+            row.fill = c.ffb_strength;
+            row.hint = "How hard the wheel pushes back: the drive board's motor, bumps, slides and the road";
+        } else if (k == SET_SPRING) {
+            row.value = c.ffb_spring > 0 ? std::to_string(int(std::lround(c.ffb_spring * 100))) + "%" : "OFF";
+            row.fill = c.ffb_spring;
+            row.hint = "Pulls the wheel back to the centre when you let go. Wheels without a spring effect leave it to their driver";
+        } else if (k == SET_INVERT) {
+            row.value = c.ffb_invert ? "ON" : "OFF";
+            row.hint = "Turn it on if the wheel pulls the wrong way: away from the centre in the bends";
+        } else if (k == SET_ROTATION) {
             int deg = int(std::lround(270.0f / c.steer_range / 10.0f)) * 10;
-            row.value = std::to_string(deg) + " DEGREES";
+            row.value = std::to_string(deg) + "\xB0";
+            row.fill = float(deg) / 1080.0f;
             row.hint = "The rotation your wheel is set to in its driver (G HUB, Fanatec, Pit House...): "
                        "the game turns it into the arcade wheel's 270 degrees";
+        } else if (k == SET_DEAD) {
+            int pct = int(std::lround(c.steer_dead * 100));
+            row.value = pct > 0 ? std::to_string(pct) + "%" : "OFF";
+            row.fill = float(pct) / float(MAX_DEAD);
+            row.hint = "Around the centre, a part of the turn that does not steer yet. For a worn wheel that does not rest still";
         } else {
             int use = k == HANDBRAKE && c.ctl[HANDBRAKE] < 0 && c.ctl[HANDBRAKE_AXIS] >= 0 ? HANDBRAKE_AXIS : k;
             int n = c.ctl[use];
@@ -802,15 +833,21 @@ std::vector<WheelRow> wheel_rows() {
 void wheel_row_input(int r, int dir) {
     if (r < 0 || r >= ROW_COUNT || !g_ok) return;
     Config& c = g_cfg;
-    if (r == ROW_FFB) {   // 0..100 % in steps of 10
-        c.ffb_strength = std::clamp(std::lround(c.ffb_strength * 10.0f) + dir, 0L, 10L) / 10.0f;
-        write_ini(c);
-        return;
-    }
-    if (r == ROW_ROTATION) {   // 180..1080 degrees in steps of 90, the arcade's 270 as 1.0
-        int deg = int(std::lround(270.0f / c.steer_range / 90.0f)) * 90;
-        deg = std::clamp(deg + 90 * dir, 270, 1080);
-        c.steer_range = 270.0f / float(deg);
+    int k = ROWS[r].ctl;
+    auto step = [&](float& v, int steps, int lo, int hi) {   // v in 1/steps
+        v = float(std::clamp(int(std::lround(v * float(steps))) + dir, lo, hi)) / float(steps);
+    };
+    if (k < 0) {
+        if (k == SET_GAIN) step(c.ffb_strength, 20, 0, 20);   // 0..100 % in steps of 5
+        if (k == SET_SPRING) step(c.ffb_spring, 20, 0, 20);
+        if (k == SET_INVERT) c.ffb_invert = !c.ffb_invert;
+        if (k == SET_DEAD) step(c.steer_dead, 100, 0, MAX_DEAD);   // 0..20 % in steps of 1
+        if (k == SET_ROTATION) {   // 270..1080 degrees in steps of 90, the arcade's 270 as 1.0
+            int deg = int(std::lround(270.0f / c.steer_range / 90.0f)) * 90;
+            deg = std::clamp(deg + 90 * dir, 270, 1080);
+            c.steer_range = 270.0f / float(deg);
+        }
+        if (k == SET_SPRING) make_spring(g_wheel);
         write_ini(c);
         return;
     }
@@ -849,7 +886,10 @@ void wheels_poll(bool focused, bool menu, std::vector<PadKey>& keys) {
     Wheel& w = g_wheel;
     WheelState& st = g_state;
     st.shift_up = st.shift_down = st.coin = st.start = st.moved = false;
-    if (!w.joy) return;
+    if (!w.joy) {
+        g_live = WheelLive{};
+        return;
+    }
     // A pedal whose rest SDL gave as 0: while it still reads 0 it has not
     // reported yet. If its first reading jumps straight to one end of the axis,
     // that end is its rest; anything else is a pedal that really rests in the
@@ -904,28 +944,39 @@ void wheels_poll(bool focused, bool menu, std::vector<PadKey>& keys) {
         return held(k) && !d.was_down[b];
     };
     auto pedal_of = [](int k) { return pedal(*g_src[k], g_cfg.ctl[k]); };
+    // The wheel and the pedals, read in the menus too for the WHEEL tab's drawing
+    float s = axis(w, g_cfg.ctl[STEER]) / 32767.0f / g_cfg.steer_range;
+    if (g_cfg.steer_invert) s = -s;
+    float m = std::fabs(s);
+    m = m < g_cfg.steer_dead ? 0.0f : (m - g_cfg.steer_dead) / (1.0f - g_cfg.steer_dead);
+    float steer = std::clamp(std::copysign(m, s), -1.0f, 1.0f), gas, brake;
+    if (g_cfg.combined_pedals) {
+        const Wheel& p = *g_src[GAS];
+        int a = g_cfg.ctl[GAS];
+        float v = (axis(p, a) - float(p.rest[std::clamp(a, 0, 15)])) / 32767.0f;
+        if (g_cfg.combined_gas_negative) v = -v;
+        gas = p.joy ? std::clamp(v, 0.0f, 1.0f) : 0.0f;
+        brake = p.joy ? std::clamp(-v, 0.0f, 1.0f) : 0.0f;
+    } else {
+        gas = pedal_of(GAS);
+        brake = pedal_of(BRAKE);
+    }
+    float handbrake = std::max(held(HANDBRAKE) ? 1.0f : 0.0f, pedal_of(HANDBRAKE_AXIS));
+    int live_gear = -1;
+    for (int g = 0; g < 4; g++) {
+        if (g_cfg.ctl[GEAR1 + g] < 0) continue;
+        if (live_gear < 0) live_gear = 0;
+        if (held(GEAR1 + g)) live_gear = g + 1;
+    }
+    g_live = {true, steer, gas, brake, handbrake, live_gear};
     if (driving) {
-        float s = axis(w, g_cfg.ctl[STEER]) / 32767.0f / g_cfg.steer_range;
-        if (g_cfg.steer_invert) s = -s;
-        float m = std::fabs(s);
-        m = m < g_cfg.steer_dead ? 0.0f : (m - g_cfg.steer_dead) / (1.0f - g_cfg.steer_dead);
-        float steer = std::clamp(std::copysign(m, s), -1.0f, 1.0f);
         st.moved |= std::fabs(steer - st.steer) > 0.01f;
         st.steer = steer;
-        if (g_cfg.combined_pedals) {
-            const Wheel& p = *g_src[GAS];
-            int a = g_cfg.ctl[GAS];
-            float v = (axis(p, a) - float(p.rest[std::clamp(a, 0, 15)])) / 32767.0f;
-            if (g_cfg.combined_gas_negative) v = -v;
-            st.gas = p.joy ? std::clamp(v, 0.0f, 1.0f) : 0.0f;
-            st.brake = p.joy ? std::clamp(-v, 0.0f, 1.0f) : 0.0f;
-        } else {
-            st.gas = pedal_of(GAS);
-            st.brake = pedal_of(BRAKE);
-        }
+        st.gas = gas;
+        st.brake = brake;
         st.moved |= st.gas > 0 || st.brake > 0;
         st.view = held(VIEW);
-        st.handbrake = held(HANDBRAKE) || pedal_of(HANDBRAKE_AXIS) > 0.5f;
+        st.handbrake = handbrake > 0.5f;
         st.shift_up = pressed(SHIFT_UP);
         st.shift_down = pressed(SHIFT_DOWN);
         st.coin = pressed(COIN);
@@ -992,6 +1043,8 @@ void wheels_shutdown() {
 }
 
 const WheelState& wheel_state() { return g_state; }
+
+const WheelLive& wheel_live() { return g_live; }
 
 void wheel_set_force(float force, float shake) {
     g_force = force;
