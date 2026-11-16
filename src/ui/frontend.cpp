@@ -2726,11 +2726,14 @@ int Frontend::draw_wheel_live(int x, int inner, int y_bottom) {
     auto U = [&](float v) { return int(v * u_ + 0.5f); };
     const WheelLive& lv = wheel_live;
     const float dim = lv.on ? 1.0f : 0.35f;
-    const int bar_w = U(34), bar_gap = U(26), pedals_w = 3 * bar_w + 2 * bar_gap;
+    const WheelArt& art = wheel_art();
+    const bool pics = art.gas.ok() && art.brake.ok() && art.handbrake.ok() && art.handbrake_base.ok();
+    const int bar_w = U(34), col = pics ? U(74) : U(60), pedals_w = 2 * col + bar_w;   // (col: from one pedal to the next)
     const int label_h = U(30);
     const int r = std::max(U(40), std::min(U(112), (inner - pedals_w - U(48)) / 2));
     const int y_top = y_bottom - 2 * r - label_h;
-    const int cx = x + r, cy = y_top + r;
+    const int gap = U(56), x_left = x + std::max(0, (inner - (2 * r + gap + pedals_w)) / 2);   // the two together, centred
+    const int cx = x_left + r, cy = y_top + r;
     const float deg = std::clamp(lv.steer, -1.0f, 1.0f) * 135.0f;
     draw_wheel_icon(float(cx), float(cy), float(r), deg, dim);
     if (lv.gear >= 0)   // an H shifter's gear in the hub
@@ -2738,23 +2741,22 @@ int Frontend::draw_wheel_live(int x, int inner, int y_bottom) {
     int ideg = int(std::lround(std::fabs(deg)));
     std::wstring turn = !lv.on ? L"NO WHEEL" : ideg == 0 ? L"0°" : (deg < 0 ? L"L " : L"R ") + std::to_wstring(ideg) + L"°";
     text(ROW_MEDIUM, U(20), turn, cx, y_bottom - U(22), 1, {lv.on ? 0xD6DEEAu : PAGE_FAINT, lv.on ? 0xD6DEEAu : PAGE_FAINT});
-    // The pedals: hand brake, brake, accelerator, at the right
-    const int px0 = x + inner - pedals_w, ptop = y_top + U(24), pbot = y_bottom - label_h;
+    // The pedals as in a car, brake and accelerator, then the hand brake, at the right
+    const int px0 = std::min(x + inner - pedals_w, x_left + 2 * r + gap), ptop = y_top + U(24), pbot = y_bottom - label_h;
     struct Pedal { const wchar_t* name; float v; uint32_t c; };
-    const Pedal pedals[3] = {{L"HAND", lv.handbrake, 0xF5C400}, {L"BRAKE", lv.brake, SABER}, {L"GAS", lv.gas, 0x4CC264}};
-    const WheelArt& art = wheel_art();
-    if (art.gas.ok() && art.brake.ok() && art.handbrake.ok() && art.handbrake_base.ok()) {   // the pictures
+    const Pedal pedals[3] = {{L"BRAKE", lv.brake, SABER}, {L"GAS", lv.gas, 0x4CC264}, {L"HAND", lv.handbrake, 0xF5C400}};
+    if (pics) {
         const float ph = float(pbot - ptop - U(4)), pw = ph / 2;   // (their plates fit the columns)
         for (int i = 0; i < 3; i++) {
-            const float v = std::clamp(pedals[i].v, 0.0f, 1.0f), mx = float(px0 + i * (bar_w + bar_gap) + bar_w / 2);
+            const float v = std::clamp(pedals[i].v, 0.0f, 1.0f), mx = float(px0 + i * col + bar_w / 2);
             const float top = float(pbot) - ph - U(2);
-            if (i == 0) {   // the lever back about its pivot, its shaft yellow when pulled (not the grip, 0..0.43)
+            if (i == 2) {   // the lever over about its pivot (outwards, clear of the pedals), its shaft yellow when pulled (not the grip, 0..0.43)
                 sprite_turned(art.handbrake_base, mx, top + ph / 2, pw, ph, 0.5f, 0.5f, 0, dim);
-                sprite_turned(art.handbrake, mx, top + ph * 0.875f, pw, ph, 0.5f, 0.875f, -28.0f * v, dim, pedals[i].c, 0.43f,
+                sprite_turned(art.handbrake, mx, top + ph * 0.875f, pw, ph, 0.5f, 0.875f, 22.0f * v, dim, pedals[i].c, 0.43f,
                               v > 0.5f ? 0.45f : 0.0f);
             } else {   // down a little, the plate filling with its colour (gas.png's plate 110..382 of 400, brake.png's 200..372)
-                const float p0 = i == 1 ? 0.5f : 0.275f, p1 = i == 1 ? 0.93f : 0.955f;
-                sprite_turned(i == 1 ? art.brake : art.gas, mx, top + ph / 2 + v * U(10), pw, ph, 0.5f, 0.5f, 0, dim,
+                const float p0 = i == 0 ? 0.5f : 0.275f, p1 = i == 0 ? 0.93f : 0.955f;
+                sprite_turned(i == 0 ? art.brake : art.gas, mx, top + ph / 2 + v * U(10), pw, ph, 0.5f, 0.5f, 0, dim,
                               pedals[i].c, v > 0.005f ? p1 - (p1 - p0) * v : 2.0f, 0.6f);
             }
             int pct = int(std::lround(v * 100));
@@ -2764,7 +2766,7 @@ int Frontend::draw_wheel_live(int x, int inner, int y_bottom) {
         return y_top - U(24);
     }
     for (int i = 0; i < 3; i++) {
-        int bx0 = px0 + i * (bar_w + bar_gap), bx1 = bx0 + bar_w;
+        int bx0 = px0 + i * col, bx1 = bx0 + bar_w;
         int fy = pbot - int(float(pbot - ptop) * std::clamp(pedals[i].v, 0.0f, 1.0f) + 0.5f);
         fill(bx0, ptop, bx1, pbot, 0x2A3240, dim);
         fill(bx0, fy, bx1, pbot, pedals[i].c, dim);
@@ -2871,7 +2873,7 @@ void Frontend::draw_wheel_prompt() {
         if (const WheelArt& art = wheel_art(); art.handbrake.ok() && art.handbrake_base.ok()) {
             const float h = R * 2.3f, pvx = icx, pvy = icy - R * 0.1f + h * 0.375f;
             sprite_turned(art.handbrake_base, icx, icy - R * 0.1f, h / 2, h, 0.5f, 0.5f, 0, 1);
-            sprite_turned(art.handbrake, pvx, pvy, h / 2, h, 0.5f, 0.875f, -28.0f * loop(ph), 1, 0xF5C400, 0.43f, 0.45f * p.progress);
+            sprite_turned(art.handbrake, pvx, pvy, h / 2, h, 0.5f, 0.875f, 22.0f * loop(ph), 1, 0xF5C400, 0.43f, 0.45f * p.progress);
             break;
         }
         float pvx = icx + R * 0.5f, pvy = icy + R * 0.75f, len = R * 1.45f;
