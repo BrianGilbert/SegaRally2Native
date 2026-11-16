@@ -388,12 +388,13 @@ const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_DUST, LIGHTING_TAB, L"ARCADE ART"}, {OPT_HUD, LIGHTING_TAB}, {OPT_LIVERIES, LIGHTING_TAB},
     {OPT_VOLUME, AUDIO_TAB, L"VOLUME"}, {OPT_MUSIC, AUDIO_TAB}, {OPT_MENU_MUSIC, AUDIO_TAB},
     {OPT_SPEAKERS, AUDIO_TAB, L"SOUND"}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
-    {OPT_CONNECTED, CONTROLS_TAB, L"DEVICES"}, {OPT_VIBRATION, CONTROLS_TAB, L"GAMEPAD"}, {OPT_TRIGGERS, CONTROLS_TAB},
+    {OPT_CONNECTED, CONTROLS_TAB, L"DEVICES"}, {OPT_WHEEL, CONTROLS_TAB, L"WHEEL"},
+    {OPT_VIBRATION, CONTROLS_TAB, L"GAMEPAD"}, {OPT_TRIGGERS, CONTROLS_TAB},
 };   // (DIFFICULTY: in PLAY > ARCADE CLASSIC's race set-up)
 
 // Under each section's name in the column at the left
 static const wchar_t* const TAB_ABOUT[] = {L"PC edition or the arcade as it was", L"Screen, smoothing, picture",
-                                           L"Lighting, ray tracing, arcade art", L"Volume, speakers, sound", L"Devices, vibration"};
+                                           L"Lighting, ray tracing, arcade art", L"Volume, speakers, sound", L"Devices, wheel, vibration"};
 
 const wchar_t* Frontend::group_of(Id id) {
     for (const OptionTab& o : OPTION_TABS)
@@ -635,6 +636,8 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {OPT_TRIGGERS, L"TRIGGER RUMBLE", settings.trigger_rumble ? std::to_wstring(settings.trigger_rumble) + L"%" : std::wstring(L"OFF"),
                  L"Xbox One / Series pads: the brake trigger trembles as you slow down, the accelerator as the wheels spin, "
                  L"both over bumps (a share of VIBRATION)"}};
+        for (size_t i = 0; i < wheel_lines.size(); i++)   // CONTROLS > WHEEL, from wheel.h
+            all.push_back({OPT_WHEEL, wheel_lines[i].label, wheel_lines[i].value, wheel_lines[i].hint, true, int(i)});
         std::vector<Item> list = {{TABS, L"", L"", pad_prompts ? L"LB / RB change the section"
                                                                : L"Q / E or Tab change the section, or click one"}};
         for (const OptionTab& o : OPTION_TABS)   // the tab's options in their order, then any not listed
@@ -883,6 +886,7 @@ void Frontend::activate(const Item& it, int dir) {
         break;
     }
     case OPT_CONNECTED: break;   // shows what is plugged in, nothing to change
+    case OPT_WHEEL: wheel_row = it.index; wheel_dir = dir; push(Action::WheelRow); break;
     case OPT_VIBRATION: settings.vibration = (settings.vibration + dir + 4) % 4; push(Action::SettingsChanged); break;
     case OPT_TRIGGERS:   // 0..100 % in steps of 10; a click past the top starts again from OFF
         settings.trigger_rumble = dir > 0 && settings.trigger_rumble >= 100 && wrap_
@@ -910,6 +914,11 @@ int Frontend::index_of(Id id) const {
 }
 
 void Frontend::back() {
+    if (screen_ == Screen::Options && wheel_listening) {   // a wheel control listening: Esc stops it, nothing else
+        push(Action::WheelCancel);
+        dirty_ = true;
+        return;
+    }
     switch (screen_) {
     case Screen::Options:
         if (!restart_open_ && !restart_list().empty()) {   // RESTART NOW? first (LATER: back as here)
@@ -2597,6 +2606,7 @@ void Frontend::draw_options_page(const std::vector<Item>& list, bool over_game) 
     for (int k = 0; k < n_opts; k++) {
         const wchar_t* g = rec ? RECORD_GROUPS[std::clamp(list[1 + k].index, 0, 3)] : group_of(list[1 + k].id);
         if (rec && k > 0 && list[k].index == list[1 + k].index) g = nullptr;   // (records: a heading where the group changes)
+        if (!rec && k > 0 && list[k].id == list[1 + k].id) g = nullptr;      // (rows of one option: CONTROLS > WHEEL)
         if (g) current = group[k] = g;
         group_name[k] = current;
     }

@@ -1222,6 +1222,8 @@ int main(int argc, char** argv) {
                     frontend.open(Frontend::Screen::Main);
                     break;
                 case Frontend::Action::Quit: presenter.close(); break;
+                case Frontend::Action::WheelRow: wheel_row_input(frontend.wheel_row, frontend.wheel_dir); break;
+                case Frontend::Action::WheelCancel: wheel_listen_cancel(); break;
                 case Frontend::Action::Restart:   // RESTART NOW: saved, closed as on QUIT, started again (end of main)
                     save_settings(s);
                     g_restart = true;
@@ -1451,6 +1453,17 @@ int main(int argc, char** argv) {
                 names += (names.empty() ? L"" : L", ") + std::wstring(wheel_name.begin(), wheel_name.end());
             frontend.gamepads = names;
             frontend.invalidate();
+        }
+        {   // CONTROLS > WHEEL: its rows as wheel.cpp has them now (a control listening, a new setting)
+            if (wheel_listening() && !frontend.active()) wheel_listen_cancel();
+            std::vector<Frontend::WheelLine> lines;
+            auto wide = [](const std::string& t) { return std::wstring(t.begin(), t.end()); };
+            for (const WheelRow& r : wheel_rows()) lines.push_back({wide(r.label), wide(r.value), wide(r.hint)});
+            if (lines != frontend.wheel_lines || wheel_listening() != frontend.wheel_listening) {
+                frontend.wheel_lines = lines;
+                frontend.wheel_listening = wheel_listening();
+                frontend.invalidate();
+            }
         }
         for (PadKey k : g_pads.take_keys()) {   // the menus, as keys (START resumes from the pause menu)
             static const int VK[] = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, 'Q', 'E', 'G'};

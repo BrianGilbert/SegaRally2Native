@@ -107,7 +107,8 @@ class Frontend {
 public:
     enum class Screen { None, Splash, Main, Options, Pause, Records, Debug, Play };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
-                        QuitToMenu, StartDebug, DisplayChanged, Restart };   // Restart: RESTART NOW   // DisplayChanged: MODE / RESOLUTION to the window
+                        QuitToMenu, StartDebug, DisplayChanged, Restart,
+                        WheelRow, WheelCancel };   // WheelRow: CONTROLS > WHEEL row wheel_row, with wheel_dir   // Restart: RESTART NOW   // DisplayChanged: MODE / RESOLUTION to the window
 
     bool init(const std::string& font_dir);
     void shutdown();
@@ -147,6 +148,16 @@ public:
     int refresh_hz = 60;                            // the monitor's (MAX FPS MONITOR)
     bool rt_available = false;   // the GPU can trace rays (RAY TRACING option)
     std::wstring gamepads;  // the pads connected, for the CONTROLS tab ("" = none)
+    // CONTROLS > WHEEL (app.cpp fills them from wheel.h's wheel_rows): choosing a
+    // row gives WheelRow with its number and direction; while a control listens
+    // for the wheel, Esc / BACK gives WheelCancel instead of leaving
+    struct WheelLine {
+        std::wstring label, value, hint;
+        bool operator==(const WheelLine& o) const { return label == o.label && value == o.value && hint == o.hint; }
+    };
+    std::vector<WheelLine> wheel_lines;
+    bool wheel_listening = false;
+    int wheel_row = -1, wheel_dir = 0;
     bool pad_prompts = false;   // a gamepad drives the menu: its buttons in the key help and hints, not the keyboard's
 
     // At launch: news.txt from GitHub in the background (when the settings
@@ -191,7 +202,8 @@ private:
         OPT_DISPLAY, OPT_VOLUME, OPT_MUSIC, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SUN, OPT_SHADOWS, OPT_SOFT, OPT_HDR, OPT_SHARPEN, OPT_HUD, OPT_LIVERIES,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_VIBRATION, OPT_RT, OPT_MENU_MUSIC, OPT_REFLECT, OPT_GI, OPT_DUST, OPT_UPDATES,
         OPT_DIFFICULTY, OPT_CONNECTED, OPT_TRIGGERS, OPT_RESOLUTION, OPT_SCALE, OPT_VSYNC, OPT_MAXFPS, OPT_BGFPS,
-        OPT_EXPERIENCE, OPT_ASPECT, OPT_ARCADE_ASPECT,   // OPT_ARCADE_ASPECT: ARCADE ORIGINAL's, under EXPERIENCE
+        OPT_EXPERIENCE, OPT_ASPECT, OPT_ARCADE_ASPECT,
+        OPT_WHEEL,   // CONTROLS > WHEEL: one row per wheel_lines entry (Item::index)   // OPT_ARCADE_ASPECT: ARCADE ORIGINAL's, under EXPERIENCE
     };
     struct Item {
         Id id;
