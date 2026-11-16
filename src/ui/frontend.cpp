@@ -2584,8 +2584,8 @@ int Frontend::draw_wheel_live(int x, int inner, int y_bottom) {
     ring(float(cx), float(cy), fr * 0.22f, fr * 0.27f, 0xC8D2E0, 0.9f * dim);
     {
         float ax, ay, bx, by;
-        at(0, fr - rim - 1, ax, ay);
-        at(0, fr + 1, bx, by);
+        at(0, fr - rim + fr * 0.06f, ax, ay);   // (the round ends inside the rim)
+        at(0, fr - fr * 0.06f, bx, by);
         bar(ax, ay, bx, by, fr * 0.06f, SABER, dim);
     }
     if (lv.gear >= 0)   // an H shifter's gear in the hub

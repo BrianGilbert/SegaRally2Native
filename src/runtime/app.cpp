@@ -1471,12 +1471,12 @@ int main(int argc, char** argv) {
             }
             // The WHEEL tab's drawing follows the wheel and the pedals
             const WheelLive& lv = wheel_live();
-            Frontend::WheelLive& shown = frontend.wheel_live;
-            bool moved = lv.on != shown.on || lv.gear != shown.gear || std::fabs(lv.steer - shown.steer) > 0.004f ||
-                         std::fabs(lv.gas - shown.gas) > 0.01f || std::fabs(lv.brake - shown.brake) > 0.01f ||
-                         std::fabs(lv.handbrake - shown.handbrake) > 0.01f;
+            Frontend::WheelLive& live_shown = frontend.wheel_live;
+            bool moved = lv.on != live_shown.on || lv.gear != live_shown.gear || std::fabs(lv.steer - live_shown.steer) > 0.004f ||
+                         std::fabs(lv.gas - live_shown.gas) > 0.01f || std::fabs(lv.brake - live_shown.brake) > 0.01f ||
+                         std::fabs(lv.handbrake - live_shown.handbrake) > 0.01f;
             if (moved) {
-                shown = {lv.on, lv.steer, lv.gas, lv.brake, lv.handbrake, lv.gear};
+                live_shown = {lv.on, lv.steer, lv.gas, lv.brake, lv.handbrake, lv.gear};
                 if (frontend.showing_wheel()) frontend.invalidate();
             }
         }
