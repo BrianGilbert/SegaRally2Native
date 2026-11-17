@@ -113,6 +113,7 @@ std::atomic<int> g_debug_jump{-1};
 std::atomic<bool> g_debug_freeze_time{false};
 std::atomic<bool> g_skip_attract{false}, g_game_over_menu{false}, g_in_attract{false};
 std::atomic<bool> g_wants_start{false};
+std::atomic<int> g_car_select{-1};
 std::atomic<bool> g_restart_program{false};
 static uint64_t g_boot_from = 0;   // the frame the program (re)started on: the power-on screens' skip gives up 3000 after
 // Menus: the game stands still (and so does its sound) while set. The boot
@@ -1415,6 +1416,11 @@ void rt_event(Ctx& c) {
                 bool wants = in_attract() || rd32(SR2_START_STEP) != 4;
                 if (wants != g_wants_start.exchange(wants))
                     printf("[play] %s START (frame %llu)\n", wants ?"waits for" : "past", (unsigned long long)g_frame);
+            }
+            {
+                int car = !in_attract() && int32_t(rd32(SR2_SELECT_STEP)) == 9 ? int(rd32(SR2_SELECT_CAR) & 7) : -1;
+                if (car != g_car_select.exchange(car) && car >= 0)
+                    printf("[select] car %d (frame %llu)\n", car, (unsigned long long)g_frame);
             }
             stats_frame();
             // The course of the race being run (round = course id + 6 x kind: championship,
