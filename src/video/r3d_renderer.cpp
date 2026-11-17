@@ -330,13 +330,18 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     cb[10] = {11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
     cb[11] = {12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
     cb[12] = {13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
-    VkDescriptorBindingFlags cflags[13] = {0, 0, 0, pending, 0, pending, 0, 0, 0, 0, 0, 0, 0};
+    // The 2D pictures (Pack2D::MAX_SLOTS) also update-after-bind when the GPU has it: its
+    // limits for that are far above the plain ones (Intel), like the texture pack's
+    VkDescriptorBindingFlags cflags[13] = {
+        0, 0, 0, pending | (uab ? VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT : 0u), 0, pending, 0, 0, 0, 0, 0, 0, 0};
     bfi.bindingCount = 13;
     bfi.pBindingFlags = cflags;
     li.pNext = &bfi;
+    li.flags = uab ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT : 0u;
     li.bindingCount = 13;
     li.pBindings = cb;
     vkCreateDescriptorSetLayout(dev_, &li, nullptr, &compose_set_layout_);
+    li.flags = 0;
     li.pNext = nullptr;
     // Bloom passes: one source image each
     li.bindingCount = 1;
