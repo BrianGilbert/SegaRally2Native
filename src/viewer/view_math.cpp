@@ -164,6 +164,17 @@ void ViewCamera::move(const float* up, float right, float rise, float forward) {
     for (int i = 0; i < 3; i++) pos[i] += rot[i] * right + up[i] * rise - rot[6 + i] * forward;
 }
 
+void ViewCamera::orbit(const float* up, float yaw, float pitch, float distance) {
+    float pivot[3];
+    for (int i = 0; i < 3; i++) pivot[i] = pos[i] - rot[6 + i] * distance;
+    turn(up, yaw, pitch);
+    for (int i = 0; i < 3; i++) pos[i] = pivot[i] + rot[6 + i] * distance;
+}
+
+void ViewCamera::track(float right, float rise) {
+    for (int i = 0; i < 3; i++) pos[i] += rot[i] * right + rot[3 + i] * rise;
+}
+
 void ViewCamera::to_view(const float* point, float* out) const {
     float d[3] = {point[0] - pos[0], point[1] - pos[1], point[2] - pos[2]};
     rotate(d, out);
@@ -309,6 +320,12 @@ bool view_ray(const R3DViewport& v, const ViewLayout& lay, float win_x, float wi
     dir[1] = (ny + v.proj[9]) / v.proj[5];
     dir[2] = -1;
     return true;
+}
+
+float view_pixel_size(const R3DViewport& v, const ViewLayout& lay) {
+    // (view_ray's dir[1] from one row of the window to the next)
+    float rows = v.h * lay.scale * std::fabs(v.proj[5]);
+    return rows > 1e-9f ? 2.0f / rows : 0.0f;
 }
 
 ViewPick view_pick(const R3DScene& moved, const std::vector<std::vector<R3DInstance>>& instances,

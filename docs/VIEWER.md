@@ -47,11 +47,15 @@ they are for your own use and are not to be shared.
 
 | | |
 |---|---|
-| Right mouse button, held | look around |
-| W A S D | move |
+| Alt + left button, dragged | orbit about what is in front of the camera |
+| Alt + middle button, dragged | slide the view sideways and up or down |
+| Alt + right button, dragged | nearer (to the right or down) or farther |
+| Mouse wheel | forward, back |
+| Right button, held | look around |
+| W A S D | fly |
 | Q, E | down, up |
-| Shift, Ctrl | faster (x4), slower (x0.25) |
-| Mouse wheel | speed |
+| Shift, Ctrl | fly faster (x4), slower (x0.25) |
+| Mouse wheel with the right button held | flying speed |
 | Left click | select the model under the pointer |
 | F | go to the selected model |
 | R | back to the game's camera |
@@ -67,6 +71,11 @@ they are for your own use and are not to be shared.
 | F12 | screenshot (`out\viewer_<frame>_<n>.bmp`) |
 | F11 | full screen |
 | Esc | let go of the selection; with nothing selected, close |
+
+The camera works the way Maya's does (Alt and the three buttons) and the way
+a game's free camera does (the right button and W A S D), whichever comes to
+hand. An orbit turns about the selected model once **F** has put the camera on
+it, and otherwise about whatever is in the middle of the picture.
 
 The side panel shows the snapshot, the camera and, for the selected model, its
 address (and whether it is in the ROM or in polygon RAM), its size, its

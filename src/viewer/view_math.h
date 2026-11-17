@@ -37,6 +37,10 @@ struct ViewCamera {
     void turn(const float* up, float yaw, float pitch);
     // Along its own right and forward axes, and along `up`
     void move(const float* up, float right, float rise, float forward);
+    // Maya's tumble: `turn`, about the point `distance` in front of it, which stays in the middle of the view
+    void orbit(const float* up, float yaw, float pitch, float distance);
+    // Maya's track: along its own right and up axes
+    void track(float right, float rise);
     void to_view(const float* point, float* out) const;   // a point of the capture as this camera sees it
     void rotate(const float* dir, float* out) const;      // a direction
 };
@@ -88,6 +92,10 @@ struct ViewPick {
 // The view ray through a point of the window, in the viewport's own view
 // space (from the origin; z = -1). false outside the viewport
 bool view_ray(const R3DViewport& v, const ViewLayout& lay, float win_x, float win_y, float dir[3]);
+
+// How much of the view one pixel of the window covers, at distance 1 from the
+// camera (times the distance: the size of a pixel there)
+float view_pixel_size(const R3DViewport& v, const ViewLayout& lay);
 
 // The nearest polygon under a point of the window, as the picture shows it: a
 // later priority covers the earlier ones

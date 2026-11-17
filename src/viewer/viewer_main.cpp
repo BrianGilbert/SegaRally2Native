@@ -164,6 +164,18 @@ std::string strf(const char* fmt, ...) {
     return buf;
 }
 
+// Alt is the key of Maya's camera here. Windows has other plans for it: let
+// go alone it opens the window's menu, which then takes the next key, and
+// with a letter it beeps for want of a menu with that letter. Both are
+// stopped on their way to the window's own procedure (Alt+Space, Alt+F4 and
+// Alt+Enter go on as before)
+WNDPROC g_window_proc = nullptr;
+LRESULT CALLBACK alt_filter(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_SYSCOMMAND && (wp & 0xFFF0) == SC_KEYMENU && lp == 0) return 0;
+    if (msg == WM_SYSCHAR && wp != VK_SPACE) return 0;
+    return CallWindowProcA(g_window_proc, hwnd, msg, wp, lp);
+}
+
 class Viewer {
 public:
     int run(const Args& args);
@@ -182,6 +194,8 @@ private:
     void export_textures();
     bool key(WPARAM vk, bool repeat);
     void click(int x, int y);
+    float interest();
+    float pixel_size() const;
     void poll(float dt);
     void draw_panel();
     void say(const std::string& message, bool warning = false) {
@@ -225,8 +239,15 @@ private:
     ViewCamera cam_;
     ViewOptions opt_;
     float speed_ = 10.0f;   // units (metres) a second
-    bool looking_ = false;
-    POINT look_anchor_{};
+    // What the mouse is doing to the camera while a button is held: looking
+    // around (the right button), or Maya's three with Alt (left, middle, right)
+    enum class Drag { None, Look, Orbit, Track, Dolly };
+    Drag drag_ = Drag::None;
+    int drag_button_ = 0;
+    POINT drag_anchor_{};
+    bool was_down_[3] = {};
+    float interest_ = 10.0f;   // how far ahead the camera's centre of interest is (Maya's name): orbits turn about it
+    float wheel_ = 0;          // notches turned since the last frame
     bool scene_dirty_ = true, panel_dirty_ = true, show_panel_ = true;
     int panel_w_ = 0, client_w_ = 0, client_h_ = 0;
     std::chrono::steady_clock::time_point panel_drawn_{};
@@ -437,34 +458,112 @@ void Viewer::click(int x, int y) {
     select(view_pick(moved_, builder_->instances(), follows_, opt_, layout(), float(x), float(y)));
 }
 
-// The camera: the right button held turns it with the mouse, W A S D move it
-// along its own axes and Q E along the world's up
+// How far ahead the camera's centre of interest is: the selected model when
+// the camera is on it (after F), or else whatever is in the middle of the
+// picture. With nothing there (the sky), as far as the last time
+float Viewer::interest() {
+    const float NEAREST = 0.5f, FARTHEST = 5000.0f;
+    if (selected() && follows_[size_t(opt_.sel_viewport)]) {
+        float c[3];
+        cam_.to_view(bounds_.centre, c);
+        if (c[2] < 0 && std::hypot(c[0], c[1]) <= std::max(bounds_.radius, 0.5f)) return interest_ = std::clamp(-c[2], NEAREST, FARTHEST);
+    }
+    ViewOptions world = opt_;
+    world.overlays = false;   // (the HUD's viewports do not move with the camera)
+    ViewLayout lay = layout();
+    float x = lay.ox + lay.view_w * lay.scale * lay.px_aspect / 2, y = lay.oy + SCREEN_H * lay.scale / 2;
+    ViewPick pick = view_pick(moved_, builder_->instances(), follows_, world, lay, x, y);
+    if (pick.hit()) interest_ = std::clamp(pick.distance, NEAREST, FARTHEST);
+    return interest_;
+}
+
+// The size of a pixel of the window at distance 1 from the camera, in the
+// world's viewport
+float Viewer::pixel_size() const {
+    const R3DViewport* best = nullptr;
+    for (size_t i = 0; i < base_.viewports.size(); i++)
+        if (follows_[i] && (!best || base_.viewports[i].world)) best = &base_.viewports[i];
+    float size = best ? view_pixel_size(*best, layout()) : 0.0f;
+    return size > 0 ? size : 0.0015f;
+}
+
+// The camera. The right button held turns it with the mouse, W A S D move it
+// along its own axes and Q E along the world's up. Maya's way too: with Alt,
+// the left button orbits, the middle one slides the view and the right one
+// goes nearer or farther, as the wheel does
 void Viewer::poll(float dt) {
     HWND hwnd = presenter_.hwnd();
     bool focus = GetForegroundWindow() == hwnd;
     auto down = [&](int vk) { return focus && (GetAsyncKeyState(vk) & 0x8000) != 0; };
     POINT p{};
     GetCursorPos(&p);
-    if (down(VK_RBUTTON) && !looking_) {
-        POINT c = p;
-        RECT rc;
-        ScreenToClient(hwnd, &c);
-        GetClientRect(hwnd, &rc);
-        if (PtInRect(&rc, c)) {
-            looking_ = true;
-            look_anchor_ = p;
-            presenter_.set_cursor_visible(false);
+
+    // (GetAsyncKeyState tells the buttons as they are on the mouse: the other way round for a left-handed one)
+    bool swapped = GetSystemMetrics(SM_SWAPBUTTON) != 0;
+    const int buttons[3] = {swapped ? VK_RBUTTON : VK_LBUTTON, VK_MBUTTON, swapped ? VK_LBUTTON : VK_RBUTTON};
+    const Drag with_alt[3] = {Drag::Orbit, Drag::Track, Drag::Dolly};
+    for (int b = 0; b < 3; b++) {
+        bool is_down = down(buttons[b]);
+        if (is_down && !was_down_[b] && drag_ == Drag::None) {
+            Drag wanted = down(VK_MENU) ? with_alt[b] : b == 2 ? Drag::Look : Drag::None;
+            POINT c = p;
+            RECT rc;
+            ScreenToClient(hwnd, &c);
+            GetClientRect(hwnd, &rc);
+            if (wanted != Drag::None && PtInRect(&rc, c)) {
+                drag_ = wanted;
+                drag_button_ = buttons[b];
+                drag_anchor_ = p;
+                if (drag_ != Drag::Look) interest();
+                presenter_.set_cursor_visible(false);
+            }
         }
-    } else if (!down(VK_RBUTTON) && looking_) {
-        looking_ = false;
+        was_down_[b] = is_down;
+    }
+    if (drag_ != Drag::None && !down(drag_button_)) {
+        drag_ = Drag::None;
         presenter_.set_cursor_visible(true);
     }
-    if (looking_ && (p.x != look_anchor_.x || p.y != look_anchor_.y)) {
-        const float per_pixel = 0.0025f;
-        cam_.turn(up_, -float(p.x - look_anchor_.x) * per_pixel, -float(p.y - look_anchor_.y) * per_pixel);
-        SetCursorPos(look_anchor_.x, look_anchor_.y);   // (so it never reaches an edge of the screen)
+    if (drag_ != Drag::None && (p.x != drag_anchor_.x || p.y != drag_anchor_.y)) {
+        const float per_pixel = 0.0025f;   // radians
+        float dx = float(p.x - drag_anchor_.x), dy = float(p.y - drag_anchor_.y);
+        switch (drag_) {
+        case Drag::Look: cam_.turn(up_, -dx * per_pixel, -dy * per_pixel); break;
+        case Drag::Orbit: cam_.orbit(up_, -dx * per_pixel, -dy * per_pixel, interest_); break;
+        case Drag::Track: {   // what is at the centre of interest stays under the pointer
+            float size = interest_ * pixel_size();
+            cam_.track(-dx * size, dy * size);
+            break;
+        }
+        case Drag::Dolly: {   // to the right or down: nearer, never past the centre of interest
+            float nearer = std::clamp(interest_ * std::exp(-(dx + dy) * 0.005f), 0.2f, 5000.0f);
+            cam_.move(up_, 0, 0, interest_ - nearer);
+            interest_ = nearer;
+            break;
+        }
+        case Drag::None: break;
+        }
+        SetCursorPos(drag_anchor_.x, drag_anchor_.y);   // (so it never reaches an edge of the screen)
         scene_dirty_ = true;
     }
+
+    if (wheel_ != 0) {
+        float notches = wheel_;
+        wheel_ = 0;
+        if (drag_ == Drag::Look) {   // flying: how fast
+            speed_ = std::clamp(speed_ * std::pow(1.25f, notches), 0.5f, 400.0f);
+        } else {
+            // A part of the way to what is ahead, and no less than a short
+            // step: close to a wall it would otherwise never get through
+            float d = interest(), step = d * (1.0f - std::pow(0.85f, notches));
+            if (notches > 0) step = std::max(step, 0.25f * notches);
+            cam_.move(up_, 0, 0, step);
+            interest_ = std::clamp(d - step, 0.5f, 5000.0f);
+            scene_dirty_ = true;
+        }
+        panel_dirty_ = true;
+    }
+
     float right = float(down('D')) - float(down('A')), rise = float(down('E')) - float(down('Q')),
           ahead = float(down('W')) - float(down('S'));
     if (right != 0 || rise != 0 || ahead != 0) {
@@ -524,7 +623,7 @@ void Viewer::draw_panel() {
     setting("Camera", cam_.moved() ? strf("free, %.0f m/s", speed_) : "the game's", "R");
     y += lh / 2;
 
-    const int bottom = client_h_ - pad - 5 * lh;   // the help and the status line below
+    const int bottom = client_h_ - pad - 6 * lh;   // the help and the status line below
     if (const R3DInstance* in = selected()) {
         const R3DViewport& v = base_.viewports[size_t(opt_.sel_viewport)];
         line("SELECTED MODEL", TITLE);
@@ -557,9 +656,10 @@ void Viewer::draw_panel() {
     }
 
     y = bottom;
-    line("Right button + mouse: look around", DIM);
-    line("W A S D: move   Q E: down, up   Shift: faster", DIM);
-    line("Wheel: speed   F: go to the model   Esc: let go", DIM);
+    line("Right button: look (wheel: speed)   W A S D Q E: fly", DIM);
+    line("Alt + left, middle, right button: orbit, pan, zoom", DIM);
+    line("Wheel: zoom   F: go to the model   Esc: let go", DIM);
+    line("Shift: faster   Ctrl: slower   R: the game's camera", DIM);
     line("X: save textures   O: open   F12: shot   Tab: panel", DIM);
     if (!status_.empty()) {
         // (what does not fit is in the console)
@@ -601,6 +701,8 @@ int Viewer::run(const Args& args) {
         return 1;
     }
     printf("GPU: %s\n", presenter_.device_name().c_str());
+    g_window_proc = reinterpret_cast<WNDPROC>(
+        SetWindowLongPtrA(presenter_.hwnd(), GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(alt_filter)));
     if (!renderer_.init(presenter_, 1.0f, args.msaa, 8)) {
         report("Could not start the 3D renderer: the graphics card or its driver lacks something it needs.", true);
         return 1;
@@ -640,11 +742,10 @@ int Viewer::run(const Args& args) {
         switch (msg) {
         case WM_KEYDOWN: return key(wp, (lp & (1 << 30)) != 0);
         case WM_LBUTTONDOWN:
-            click(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+            if (GetKeyState(VK_MENU) >= 0) click(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));   // (with Alt it is an orbit)
             return true;
         case WM_MOUSEWHEEL:
-            speed_ = std::clamp(speed_ * std::pow(1.25f, float(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA), 0.5f, 400.0f);
-            panel_dirty_ = true;
+            wheel_ += float(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA;   // (poll moves the camera)
             return true;
         }
         return false;

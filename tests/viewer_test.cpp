@@ -210,6 +210,22 @@ static void test_camera() {
     float above[3] = {0, 10, 0};
     cam.to_view(above, q);
     CHECK(close_to(q[0], 0) && close_to(q[1], 0) && close_to(q[2], -10));
+    // An orbit keeps the point it turns about straight ahead and as far away
+    cam.reset();
+    cam.move(up, 1, 2, 3);
+    float pivot[3] = {1, 2, -3 - 7};
+    for (int i = 0; i < 300; i++) cam.orbit(up, 0.021f, i % 3 ? 0.004f : -0.011f, 7);
+    cam.to_view(pivot, q);
+    CHECK(close_to(q[0], 0, 1e-2f) && close_to(q[1], 0, 1e-2f) && close_to(q[2], -7, 1e-2f));
+    // Dragged to the right, the camera goes round to the left of what it looks at
+    cam.reset();
+    cam.orbit(up, -1.5707963f, 0, 5);
+    CHECK(close_to(cam.pos[0], -5) && close_to(cam.pos[1], 0) && close_to(cam.pos[2], -5));
+    // A track slides it along its own right and up, whatever the world's up is
+    cam.reset();
+    cam.turn(up, 0, 1.5707963f);   // looking straight up: its own up is now +Z
+    cam.track(2, 3);
+    CHECK(close_to(cam.pos[0], 2) && close_to(cam.pos[1], 0) && close_to(cam.pos[2], 3));
     // Many small turns leave its axes square and of unit length
     cam.reset();
     for (int i = 0; i < 5000; i++) cam.turn(up, 0.013f, i % 2 ? 0.007f : -0.0065f);
@@ -319,6 +335,10 @@ static void test_scene() {
     float dir[3];
     CHECK(view_ray(v, lay, 496, 384, dir) && close_to(dir[0], 0) && close_to(dir[1], 0) && dir[2] == -1);
     CHECK(!view_ray(v, lay, -5, 384, dir) && !view_ray(v, lay, 496, 800, dir));
+    // A pixel of the window, as the rays of two rows one apart tell it
+    float lower[3];
+    CHECK(view_ray(v, lay, 496, 300, dir) && view_ray(v, lay, 496, 301, lower));
+    CHECK(view_pixel_size(v, lay) > 0 && close_to(std::fabs(lower[1] - dir[1]), view_pixel_size(v, lay), 1e-6f));
     float x, y;
     to_window(v, lay, a.origin, x, y);
     CHECK(close_to(x, 496) && close_to(y, 384));
