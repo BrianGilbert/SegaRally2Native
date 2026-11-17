@@ -13,6 +13,11 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[25] 17 November 2026
+- New OPTIONS > WHEEL tab: set each wheel control by moving it, plus force feedback (gain, centring spring, invert), wheel rotation and dead zone.
+- WHEEL SETUP walks you through your wheel step by step, including a force feedback direction test.
+- The wheel, pedals and hand brake are drawn live as you move them.
+
 [24] 16 November 2026
 - Pedals, H-shifter and handbrake can now be on separate USB devices (pedals_device, shifter_device, handbrake_device in save\wheel.ini).
 - Force feedback should no longer cut out mid-race on some wheels (not tested on a real wheel yet).
