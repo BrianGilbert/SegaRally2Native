@@ -1232,8 +1232,8 @@ WheelPrompt wheel_prompt() {
 
 void wheel_prompt_choose(int choice) {
     if (!g_p.on) return;
-    if (g_p.done_at >= 0) {   // the control just taken: on at once
-        g_p.done_at = -100;
+    if (g_p.done_at >= 0) {   // the control just taken: on at once, as the message's end would
+        next_step();
         return;
     }
     if (!g_p.setup) return;
