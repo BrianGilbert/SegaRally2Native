@@ -78,6 +78,14 @@ a game's free camera does (the right button and W A S D), whichever comes to
 hand. An orbit turns about the selected model once **F** has put the camera on
 it, and otherwise about whatever is in the middle of the picture.
 
+The game films some shots (its attract sequence, for one) from far away
+through a long lens, a few degrees wide. Flown with, such a lens shows next to no
+perspective, so the first move away from the game's camera swaps it for a
+normal one (55 degrees from top to bottom) and brings the camera forward to
+where what was in the middle of the picture looks as large as it did. A lens
+of 35 degrees or more is left as the game has it. **-** and **+** change it
+by hand, and **R** goes back to the game's camera and lens.
+
 The side panel shows the snapshot, the camera and, for the selected model, its
 address (and whether it is in the ROM or in polygon RAM), its size, its
 viewport and its textures. Each texture is listed under the name a texture pack gives it

@@ -194,7 +194,8 @@ private:
     void export_textures();
     bool key(WPARAM vk, bool repeat);
     void click(int x, int y);
-    float interest();
+    bool find_interest();
+    bool take_camera();
     const R3DViewport* world_viewport() const;
     float pixel_size() const;
     void widen(float by);
@@ -379,6 +380,7 @@ void Viewer::focus() {
     const R3DInstance* in = selected();
     if (!in) return say("Click a model first", true);
     if (!follows_[size_t(opt_.sel_viewport)]) return say("That model is drawn over the picture: the camera does not move it", true);
+    take_camera();
     float away = std::max(bounds_.radius * 2.5f, 2.0f);
     for (int i = 0; i < 3; i++) cam_.pos[i] = bounds_.centre[i] + cam_.rot[6 + i] * away;
     scene_dirty_ = panel_dirty_ = true;
@@ -463,15 +465,18 @@ void Viewer::click(int x, int y) {
     select(view_pick(moved_, builder_->instances(), follows_, opt_, layout(), float(x), float(y)));
 }
 
-// How far ahead the camera's centre of interest is: the selected model when
-// the camera is on it (after F), or else whatever is in the middle of the
-// picture. With nothing there (the sky), as far as the last time
-float Viewer::interest() {
+// How far ahead the camera's centre of interest is (interest_): the selected
+// model when the camera is on it (after F), or else whatever is in the middle
+// of the picture. false with nothing there (the sky): as far as the last time
+bool Viewer::find_interest() {
     const float NEAREST = 0.5f, FARTHEST = 5000.0f;
     if (selected() && follows_[size_t(opt_.sel_viewport)]) {
         float c[3];
         cam_.to_view(bounds_.centre, c);
-        if (c[2] < 0 && std::hypot(c[0], c[1]) <= std::max(bounds_.radius, 0.5f)) return interest_ = std::clamp(-c[2], NEAREST, FARTHEST);
+        if (c[2] < 0 && std::hypot(c[0], c[1]) <= std::max(bounds_.radius, 0.5f)) {
+            interest_ = std::clamp(-c[2], NEAREST, FARTHEST);
+            return true;
+        }
     }
     ViewOptions world = opt_;
     world.overlays = false;   // (the HUD's viewports do not move with the camera)
@@ -479,7 +484,32 @@ float Viewer::interest() {
     float x = lay.ox + lay.view_w * lay.scale * lay.px_aspect / 2, y = lay.oy + SCREEN_H * lay.scale / 2;
     ViewPick pick = view_pick(moved_, builder_->instances(), follows_, world, lay, x, y);
     if (pick.hit()) interest_ = std::clamp(pick.distance, NEAREST, FARTHEST);
-    return interest_;
+    return pick.hit();
+}
+
+// The first move away from the game's camera. The game films some shots (its
+// attract sequence) from far away through a long lens, a few degrees wide:
+// flown with, it shows next to no perspective (everything turns and slides as
+// one flat picture). A normal lens takes its place, and the camera goes
+// forward to where that lens shows what was in the middle of the picture as
+// large as it was. true when it did (moved_ is then a frame behind)
+bool Viewer::take_camera() {
+    if (cam_.moved()) return false;
+    const R3DViewport* v = world_viewport();
+    if (!v) return false;
+    float across = 0, down = 0;
+    view_angles(*v, layout(), across, down);
+    const float LONG = 0.3153f, NORMAL = 0.5206f;   // from top to bottom: under 35 degrees, and 55
+    if (down <= 0 || down >= LONG) return false;
+    cam_.lens = NORMAL / down;
+    if (find_interest()) {
+        float nearer = std::max(interest_ / cam_.lens, 0.5f);
+        cam_.move(up_, 0, 0, interest_ - nearer);
+        interest_ = nearer;
+    }
+    say(strf("Long lens of the game (%.0f deg) swapped: R undoes", std::atan(down) * 2 * 57.29578f));
+    scene_dirty_ = true;
+    return true;
 }
 
 // The viewport the camera's own numbers are told from: the world's as the
@@ -535,7 +565,7 @@ void Viewer::poll(float dt) {
                 drag_ = wanted;
                 drag_button_ = buttons[b];
                 drag_anchor_ = p;
-                if (drag_ != Drag::Look) interest();
+                if (!take_camera() && drag_ != Drag::Look) find_interest();
                 presenter_.set_cursor_visible(false);
             }
         }
@@ -576,7 +606,8 @@ void Viewer::poll(float dt) {
         } else {
             // A part of the way to what is ahead, and no less than a short
             // step: close to a wall it would otherwise never get through
-            float d = interest(), step = d * (1.0f - std::pow(0.85f, notches));
+            if (!take_camera()) find_interest();
+            float d = interest_, step = d * (1.0f - std::pow(0.85f, notches));
             if (notches > 0) step = std::max(step, 0.25f * notches);
             cam_.move(up_, 0, 0, step);
             interest_ = std::clamp(d - step, 0.5f, 5000.0f);
@@ -588,6 +619,7 @@ void Viewer::poll(float dt) {
     float right = float(down('D')) - float(down('A')), rise = float(down('E')) - float(down('Q')),
           ahead = float(down('W')) - float(down('S'));
     if (right != 0 || rise != 0 || ahead != 0) {
+        take_camera();
         float step = speed_ * dt * (down(VK_SHIFT) ? 4.0f : 1.0f) * (down(VK_CONTROL) ? 0.25f : 1.0f);
         cam_.move(up_, right * step, rise * step, ahead * step);
         scene_dirty_ = true;
