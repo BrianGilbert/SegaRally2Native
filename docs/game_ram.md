@@ -255,8 +255,13 @@ NORMAL, difficulty NORMAL. When each one is read:
 
 - SPEED: by the HUD as it draws, so the bit works at any time.
 - GAME MODE: at the race set-up (0x46AAC calls 0x2C854 / 0x2C978, which put
-  0/1 or 2/3 in the game structure's +0x00 and +0x10). SPECIAL started a
-  Desert championship with 80 s instead of 50.
+  0/1 or 2/3 in the game structure's +0x00 and +0x10: 0 championship, 1
+  championship SPECIAL, 2 practice, 3 practice SPECIAL). The owner's manual:
+  "Setting of Laps... SPECIAL (more laps, a long-time game mode for events)".
+  The laps (+0x3C) come from the table at 0xE8388, 8 words per mode, one per
+  course (0x404BC): 1 lap (Riviera 2), SPECIAL 3 (Riviera 5); practice 3
+  (Riviera 5), SPECIAL 10. SPECIAL also started a Desert championship with
+  80 s instead of 50.
 - DEFAULT VIEW: copied at the credit (0x2C7D4, from the main loop at 0x2DD04)
   into the game structure's +0x20 (0x22CF34): 0xC9 DRIVER, 0xCA BEHIND. PLAY
   finds the game past that point, so the race set-up also writes 0x22CF34

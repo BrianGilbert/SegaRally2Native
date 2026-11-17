@@ -1571,7 +1571,8 @@ void Frontend::draw_setup() {
                                 s.default_view ? L"BEHIND" : L"DRIVER", s.speed_kmh ? L"KM/H" : L"MPH"};
     const wchar_t* hints[4] = {
         L"The time you get at the start and at each checkpoint",
-        s.game_mode ? L"The cabinet's SPECIAL game: more time to start with (80 s instead of 50 on Desert)" : L"The arcade's normal game",
+        s.game_mode ? L"The cabinet's SPECIAL game: 3 laps per stage instead of 1 (Riviera 5), 10 in practice"
+                    : L"The arcade's normal game: 1 lap per stage (Riviera 2), 3 in practice",
         s.default_view ? L"The race starts with the camera behind the car (VIEW CHANGE switches it)"
                        : L"The race starts in the driver's view (VIEW CHANGE switches it)",
         s.speed_kmh ? L"The speedometer in kilometres per hour" : L"The speedometer in miles per hour"};
