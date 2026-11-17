@@ -64,6 +64,9 @@ extern std::atomic<bool> g_in_attract;
 // SELECT GAME (EXPERIENCE ARCADE ORIGINAL: the pad's START is the cabinet's
 // START there, and the pause menu everywhere else; app_input.cpp)
 extern std::atomic<bool> g_wants_start;
+// SELECT CAR is up: the car under its cursor (0..7, the model index), else -1.
+// The keyboard's arrows step it one car a press there (app_input.cpp)
+extern std::atomic<int> g_car_select;
 // ARCADE ORIGINAL: its CREDIT setting changed; the program restarts once in the attract (runtime.cpp, rt_event)
 extern std::atomic<bool> g_restart_program;
 // Widescreen: how much wider than 4:3 the 3D view is (set by the window,

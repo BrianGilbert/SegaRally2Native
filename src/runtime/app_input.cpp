@@ -19,6 +19,30 @@ float g_trigger_share = 1.0f;
 
 static int adc(float v) { return std::clamp(int(std::lround(v)), 0, 255); }
 
+// SELECT CAR picks the car from where the wheel is (the game, 0x00003F30):
+// six bands of the steering ADC (up to 0x44 the first car, 0x46-0x59,
+// 0x5B-0x6F, 0x91-0xA4, 0xA6-0xB9, from 0xBB the sixth), the centre keeping
+// the car there is; the hidden pair (0x00004028) up to 0x6F the Delta, past
+// 0x90 the Celica. The arrows, turning the wheel over 0.3 s and back, went
+// through the middle bands in a frame or two and only ever stopped on the
+// outer cars (issue #105). There each press steps one car: the wheel is put in
+// the next car's band for a moment, then straight back to the centre (no
+// sweep back over the others); held, it repeats
+static int car_select_steer(int car, int dir, double now) {
+    static constexpr int BAND[6] = {0x20, 0x50, 0x65, 0x9A, 0xAF, 0xE0};
+    static int last_dir = 0, held = 0x80, held_car = 0;
+    static double held_until = 0, repeat_at = 0;
+    if (dir != 0 && (dir != last_dir || now >= repeat_at)) {
+        if (now < held_until) car = held_car;   // pressed again before the game took the last one
+        held_car = car >= 6 ? car : std::clamp(car + dir, 0, 5);
+        held = car >= 6 ? (dir < 0 ? 0x40 : 0xC0) : BAND[held_car];
+        held_until = now + 0.1;   // the game reads the ADC at 57.5 Hz: a few frames
+        repeat_at = now + (dir != last_dir ? 0.45 : 0.25);
+    }
+    last_dir = dir;
+    return now < held_until ? held : 0x80;
+}
+
 // The car on the keyboard: arrows steer (the wheel turns over ~0.3 s and
 // comes back by itself), Up / Down are the accelerator and the brake, A / Z
 // shift up / down, V is VIEW CHANGE and Space the hand brake. The pads and
@@ -32,10 +56,15 @@ static void poll_car_keys(Inputs& in, Down down) {
     float dt = std::clamp(float(now - last), 0.0f, 0.05f);
     last = now;
     int dir = down(VK_RIGHT) - down(VK_LEFT);
-    float target = float(dir);
-    float rate = dir == 0 || (target > 0) != (steer > 0) ? 6.0f : 3.5f;   // back to the centre faster
-    steer += std::clamp(target - steer, -rate * dt, rate * dt);
-    in.steer = adc(128.0f + 127.0f * steer);
+    if (int car = g_car_select; car >= 0) {   // SELECT CAR: a car a press
+        in.steer = car_select_steer(car, dir, now);
+        steer = 0;
+    } else {
+        float target = float(dir);
+        float rate = dir == 0 || (target > 0) != (steer > 0) ? 6.0f : 3.5f;   // back to the centre faster
+        steer += std::clamp(target - steer, -rate * dt, rate * dt);
+        in.steer = adc(128.0f + 127.0f * steer);
+    }
     in.accel = down(VK_UP) ? 0xFF : 0;
     in.brake = down(VK_DOWN) ? 0xFF : 0;
     bool up = down('A'), dn = down('Z');
