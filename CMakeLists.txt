@@ -198,6 +198,7 @@ add_executable(SegaRally2 WIN32
     src/runtime/app_input.cpp
     src/runtime/settings_bridge.cpp
     src/runtime/eeprom.cpp
+    src/runtime/disk_writer.cpp
     src/runtime/jtag.cpp
     src/runtime/drive_board.cpp
     third_party/z80/z80.c
@@ -379,8 +380,9 @@ if(LW_TESTS)
     add_executable(news_test tests/news_test.cpp src/ui/news.cpp)
     add_executable(menu_music_test tests/menu_music_test.cpp src/ui/menu_music.cpp)
     target_include_directories(menu_music_test PRIVATE third_party/minimp3)
-    add_executable(achievements_csv_test tests/achievements_csv_test.cpp src/runtime/achievements_csv.cpp)
+    add_executable(achievements_csv_test tests/achievements_csv_test.cpp src/runtime/achievements_csv.cpp src/runtime/disk_writer.cpp)
     target_include_directories(achievements_csv_test PRIVATE ${ICONS_DIR})
+    add_executable(disk_writer_test tests/disk_writer_test.cpp src/runtime/disk_writer.cpp)
     # The capture viewer without its window: its own code and the game's scene builder
     add_executable(viewer_test tests/viewer_test.cpp src/viewer/capture.cpp src/viewer/textures.cpp src/viewer/view_math.cpp
         src/video/r3d_state.cpp src/video/r3d_scene.cpp src/video/r3d_screen.cpp src/video/r3d_dust.cpp src/video/r3d_world.cpp
@@ -388,7 +390,7 @@ if(LW_TESTS)
     target_include_directories(viewer_test PRIVATE src/viewer)
     target_link_libraries(viewer_test PRIVATE ole32 windowscodecs)
     foreach(t tilegen_test fnv_test options_test audio_stream_test rom_zip_test jtag_test r3d_state_test news_test menu_music_test
-            achievements_csv_test viewer_test)
+            achievements_csv_test disk_writer_test viewer_test)
         target_include_directories(${t} PRIVATE src/video src/common src/runtime src/audio src/ui ${MINIZ_DIR})
         if(MSVC)
             target_compile_options(${t} PRIVATE /W4 /utf-8)
@@ -405,6 +407,7 @@ if(LW_TESTS)
     add_test(NAME news COMMAND news_test)
     add_test(NAME menu_music COMMAND menu_music_test)
     add_test(NAME achievements_csv COMMAND achievements_csv_test)
+    add_test(NAME disk_writer COMMAND disk_writer_test)
     add_test(NAME viewer COMMAND viewer_test)
     # 3.10: the version the tools need, so an older Python in PATH is skipped (Star Wars Trilogy issue #51)
     find_package(Python3 3.10 COMPONENTS Interpreter)
