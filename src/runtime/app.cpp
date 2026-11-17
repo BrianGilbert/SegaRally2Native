@@ -1802,14 +1802,14 @@ int main(int argc, char** argv) {
                 if (game_fps > 0 && (game_fps < 50 || worst_gap > gap_limit || second_presents < 55 || second_presents < 0.9 * refreshes)) {
                     // (written by the disk writer's thread: a slow drive must not
                     // make the next second slow too)
-                    std::string text;
+                    std::string slow_text;
                     char line[512];
                     snprintf(line, sizeof line, "frame %llu: game %.1f fps, %d presents, worst gap %.0f ms, build %.1f ms (worst %.1f), %zu polygons\n",
                             (unsigned long long)built->frame, game_fps, second_presents, worst_gap * 1000,
                             g_build_ms.load(), g_build_worst_ms.exchange(0), scene ? scene->polygons : size_t(0));
-                    text += line;
+                    slow_text += line;
                     std::string gpu = renderer.worst_gpu_frame();
-                    if (!gpu.empty()) text += "    " + gpu + "; texture rows uploaded " + std::to_string(g_tex_rows_second) + "\n";
+                    if (!gpu.empty()) slow_text += "    " + gpu + "; texture rows uploaded " + std::to_string(g_tex_rows_second) + "\n";
                     // Where that longest gap went: `wait` is the screen or the GPU
                     // late with an earlier image, the rest this thread's own work
                     const LoopParts& w = worst_parts;
@@ -1820,8 +1820,8 @@ int main(int argc, char** argv) {
                             w.wait * 1000, w.window * 1000, w.menu * 1000, w.input * 1000, w.vibration * 1000, w.scene * 1000,
                             w.textures * 1000, w.gpu_wait * 1000, w.acquire * 1000, w.record * 1000, w.present * 1000,
                             other * 1000);
-                    text += line;
-                    disk_append("out/slow.log", std::move(text));
+                    slow_text += line;
+                    disk_append("out/slow.log", std::move(slow_text));
                 }
                 g_build_worst_ms = 0;
                 g_tex_rows_second = 0;
