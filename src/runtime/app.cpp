@@ -528,11 +528,13 @@ int main(int argc, char** argv) {
     // the pack stays loaded so the option changes during a race (dumping keeps it on)
     auto liveries_pack = [&]() -> TexturePack* { return g_opt.classic_liveries && !g_opt.dump_textures ? nullptr : &pack; };
     builder.set_texture_pack(liveries_pack(), &g_texture_ram);
-    // 2D replacements: the foreground (GPU slots 1-27) and the layers below the
-    // 3D image (28-55; the backdrops of SkyPack use 56-63)
+    // 2D replacements: the foreground (GPU slots 1-191, textures/2d has 59
+    // pictures) and the layers below the 3D image (192-247; the backdrops of
+    // SkyPack use 248-255). More pictures than slots reuse the oldest (pack2d.h)
     Pack2D pack2d, pack2d_back;
-    pack2d.init("textures/2d", 1, 27);
-    pack2d_back.init("textures/2d_back", 28, SkyPack::FIRST_SLOT - 1);
+    pack2d.init("textures/2d", 1, 191);
+    pack2d_back.init("textures/2d_back", 192, SkyPack::FIRST_SLOT - 1);
+    static_assert(SkyPack::LAST_SLOT == Pack2D::MAX_SLOTS - 1, "the backdrops take the last slots");
     SkyPack sky;   // sky and other backdrops below the 3D image
     sky.init("textures/sky", g_opt.dump_textures ? "out/sky" : "");
     // Interpolation of the back layers (the sky): where each row's picture was
