@@ -582,12 +582,16 @@ uint32_t R3DSceneBuilder::instance_key(uint32_t model_addr) {
     return r3d_mix_key(k, instance_count_[k]++);   // the same model drawn again through the same path
 }
 
+// SR2_COPIES_AS_IS: copies paired by their place in the view alone, as
+// before (to compare)
+static const bool copies_as_is = getenv("SR2_COPIES_AS_IS") != nullptr;
+
 // Copies of one model (the ammo counter's cartridges) are told apart by the
 // path and order they are drawn in, and the game reorders its list from frame
 // to frame: a cartridge would then be interpolated towards its neighbour and
 // bob up and down. Each copy takes the key of the nearest copy of the
 // previous frame instead.
-void R3DSceneBuilder::pair_copies() {
+void R3DSceneBuilder::pair_copies(const R3DScene& out) {
     auto& now = copies_now_;
     auto& before = copies_before_;
     auto& rekey = rekey_;
@@ -601,6 +605,56 @@ void R3DSceneBuilder::pair_copies() {
     for (auto& list : viewport_instances_)
         for (R3DInstance& in : list) now[in.path].push_back(&in);
     for (const PrevInstance& p : prev_instances_) before[p.path].push_back(&p);
+    // A copy riding on another model is told by its place on it: the two
+    // heads in a car (driver's, co-driver's: one model) come in either order
+    // from frame to frame, 60 cm apart across the car; with the car moving
+    // that much across the camera's view in a frame (the attract's cameras
+    // beside the road, a car going past them) each head was paired with the
+    // other one's place, or with none, and the heads wobbled in the cabin like
+    // rag dolls. A copy rides on the biggest model within 3 m turned its own
+    // way (not the scenery's): a car's bodywork
+    auto same_axes = [](const float* a, const float* b) {
+        for (int i = 0; i < 9; i++)
+            if (std::fabs(a[i] - b[i]) > 0.01f) return false;
+        return true;
+    };
+    for (size_t vi = 0; vi < viewport_instances_.size() && !copies_as_is; vi++) {
+        auto& list = viewport_instances_[vi];
+        const float* world = nullptr;
+        for (const R3DViewport& v : out.viewports)
+            if (v.build_index == vi && v.world) world = v.world_axes;
+        auto& bases = bases_;
+        bases.clear();
+        for (const R3DInstance& in : list)
+            if (in.polygons >= 200 && !(world && same_axes(in.axes, world))) bases.push_back(&in);
+        if (bases.empty()) continue;
+        for (R3DInstance& in : list) {
+            auto group = now.find(in.path);
+            if (group->second.size() < 2 || group->second.size() > 64) continue;
+            // (not the scenery's copies, the fence posts, nor sprites: the dust
+            // and stones a car throws, a polygon or two)
+            if (in.polygons < 8 || (world && same_axes(in.axes, world))) continue;
+            const R3DInstance* best = nullptr;
+            for (const R3DInstance* b : bases) {
+                if (b->path == in.path) continue;
+                float d[3] = {in.origin[0] - b->origin[0], in.origin[1] - b->origin[1], in.origin[2] - b->origin[2]};
+                if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 3.0f * 3.0f) continue;
+                if (!best || b->polygons > best->polygons) best = b;
+            }
+            if (!best) continue;
+            float d[3] = {in.origin[0] - best->origin[0], in.origin[1] - best->origin[1], in.origin[2] - best->origin[2]};
+            for (int c = 0; c < 3; c++) in.ride[c] = d[0] * best->axes[c * 3] + d[1] * best->axes[c * 3 + 1] + d[2] * best->axes[c * 3 + 2];
+            in.ride_on = best->model;
+        }
+    }
+    // ... only where every copy rides (both heads in their cars): a few of a
+    // group near a car, the rest not, are no passengers (spectators)
+    for (auto& [path, copies] : now)
+        for (const R3DInstance* in : copies)
+            if (!in->ride_on) {
+                for (R3DInstance* c : copies) c->ride_on = 0;
+                break;
+            }
     for (auto& [path, copies] : now) {
         if (copies.empty()) continue;
         auto it = before.find(path);   // (an empty list: the path was not drawn last frame)
@@ -616,6 +670,13 @@ void R3DSceneBuilder::pair_copies() {
             for (uint32_t b = 0; b < old.size(); b++) {
                 float d = 0;
                 for (int c = 0; c < 3; c++) d += std::fabs(copies[a]->origin[c] - old[b]->origin[c]);
+                // (riding on the same model: by the place on it first; the
+                // view then tells two cars of one kind apart)
+                if (copies[a]->ride_on && copies[a]->ride_on == old[b]->ride_on) {
+                    float r = 0;
+                    for (int c = 0; c < 3; c++) r += std::fabs(copies[a]->ride[c] - old[b]->ride[c]);
+                    d = r + 0.1f * d;
+                }
                 // The partner found by list order wins unless another is clearly closer
                 if (copies[a]->key == old[b]->key) d *= 0.5f;
                 pairs.push_back({d, a, b});
@@ -707,7 +768,8 @@ void R3DSceneBuilder::pair_copies() {
     prev_instances_.clear();
     for (const auto& list : viewport_instances_)
         for (const R3DInstance& in : list)
-            prev_instances_.push_back({in.key, in.path, in.start, {in.origin[0], in.origin[1], in.origin[2]}});
+            prev_instances_.push_back({in.key, in.path, in.start, {in.origin[0], in.origin[1], in.origin[2]},
+                                       {in.ride[0], in.ride[1], in.ride[2]}, in.ride_on});
 }
 
 // Fills R3DVertex::prev from the previous frame. Vertices that are new, or
@@ -716,7 +778,7 @@ void R3DSceneBuilder::pair_copies() {
 // blending their vertices in a straight line folds the polygons.
 void R3DSceneBuilder::link_previous(R3DScene& out) {
     out.moving = 0;
-    pair_copies();
+    pair_copies(out);
     auto& axes = axes_;
     auto& spinning = spinning_;
     auto& origins = origins_;

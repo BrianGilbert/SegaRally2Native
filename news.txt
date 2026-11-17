@@ -13,6 +13,9 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[26] 17 November 2026
+- The drivers' heads no longer wobble inside the cars in the attract demos and replays.
+
 [25] 17 November 2026
 - New OPTIONS > WHEEL tab: set each wheel control by moving it, plus force feedback (gain, centring spring, invert), wheel rotation and dead zone.
 - WHEEL SETUP walks you through your wheel step by step, including a force feedback direction test.

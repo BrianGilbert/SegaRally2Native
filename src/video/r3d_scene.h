@@ -192,9 +192,12 @@ private:
     struct PrevInstance {
         uint32_t key, path, start;
         float origin[3];
+        float ride[3];
+        uint32_t ride_on;
     };
     std::vector<PrevInstance> prev_instances_;   // for pairing identical copies by place
-    void pair_copies();
+    void pair_copies(const R3DScene& out);
+    std::vector<const R3DInstance*> bases_;      // (pair_copies: the models copies may ride on)
     // pair_copies' and link_previous' tables, kept from frame to frame (cleared, their buckets stay)
     std::unordered_map<uint32_t, std::vector<R3DInstance*>> copies_now_;
     std::unordered_map<uint32_t, std::vector<const PrevInstance*>> copies_before_;
