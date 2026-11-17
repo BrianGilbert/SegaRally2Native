@@ -144,7 +144,7 @@ float ray_triangle(const float* dir, const float* a, const float* b, const float
 
 bool ViewCamera::moved() const {
     static const ViewCamera still;
-    return memcmp(pos, still.pos, sizeof(pos)) != 0 || memcmp(rot, still.rot, sizeof(rot)) != 0;
+    return memcmp(pos, still.pos, sizeof(pos)) != 0 || memcmp(rot, still.rot, sizeof(rot)) != 0 || lens != still.lens;
 }
 
 void ViewCamera::turn(const float* up, float yaw, float pitch) {
@@ -230,6 +230,8 @@ void view_move(const R3DScene& base, const ViewCamera& cam, const std::vector<ui
         move_range(out.vertices, v.opaque_first, v.opaque_count);
         move_range(out.vertices, v.trans_first, v.trans_count);
         move_range(out.backs, v.back_first, v.back_count);
+        // (the off-centre terms are ratios of the frustum's sides: they stay)
+        if (cam.lens > 0) v.proj[0] /= cam.lens, v.proj[5] /= cam.lens;
         // The camera in the tracked world frame, before its axes are turned
         for (int k = 0; k < 3; k++) v.camera[k] += dot3(v.world_axes + 3 * k, cam.pos);
         cam.rotate(v.sun, v.sun);
@@ -322,11 +324,14 @@ bool view_ray(const R3DViewport& v, const ViewLayout& lay, float win_x, float wi
     return true;
 }
 
-float view_pixel_size(const R3DViewport& v, const ViewLayout& lay) {
-    // (view_ray's dir[1] from one row of the window to the next)
-    float rows = v.h * lay.scale * std::fabs(v.proj[5]);
-    return rows > 1e-9f ? 2.0f / rows : 0.0f;
+void view_angles(const R3DViewport& v, const ViewLayout& lay, float& across, float& down) {
+    float p0 = std::fabs(place_of(v, lay).p0), p5 = std::fabs(v.proj[5]);
+    across = p0 > 1e-9f ? 1.0f / p0 : 0.0f;
+    down = p5 > 1e-9f ? 1.0f / p5 : 0.0f;
 }
+
+// (view_ray's dir[1] from one row of the window to the next)
+float view_pixel_size(const R3DViewport& v, const ViewLayout& lay) { return pixel_slope(v, lay); }
 
 ViewPick view_pick(const R3DScene& moved, const std::vector<std::vector<R3DInstance>>& instances,
                    const std::vector<uint8_t>& follows, const ViewOptions& opt, const ViewLayout& lay, float win_x,

@@ -195,7 +195,9 @@ private:
     bool key(WPARAM vk, bool repeat);
     void click(int x, int y);
     float interest();
+    const R3DViewport* world_viewport() const;
     float pixel_size() const;
+    void widen(float by);
     void poll(float dt);
     void draw_panel();
     void say(const std::string& message, bool warning = false) {
@@ -407,7 +409,8 @@ void Viewer::export_textures() {
 
 // true: the key was the viewer's (Esc otherwise closes the window, F11 goes full screen)
 bool Viewer::key(WPARAM vk, bool repeat) {
-    if (repeat) return vk != VK_ESCAPE && vk != VK_F11;
+    bool lens_key = vk == VK_OEM_PLUS || vk == VK_ADD || vk == VK_OEM_MINUS || vk == VK_SUBTRACT;
+    if (repeat && !lens_key) return vk != VK_ESCAPE && vk != VK_F11;
     switch (vk) {
     case '1': opt_.mode = ViewMode::Normal; break;
     case '2': opt_.mode = ViewMode::Flat; break;
@@ -432,6 +435,8 @@ bool Viewer::key(WPARAM vk, bool repeat) {
         break;
     case 'V': next_viewport(); break;
     case 'R': cam_.reset(); break;
+    case VK_OEM_PLUS: case VK_ADD: widen(1.1f); break;
+    case VK_OEM_MINUS: case VK_SUBTRACT: widen(1 / 1.1f); break;
     case 'F': focus(); break;
     case 'X': export_textures(); break;
     case 'O': ask_open_ = true; break;
@@ -477,14 +482,30 @@ float Viewer::interest() {
     return interest_;
 }
 
-// The size of a pixel of the window at distance 1 from the camera, in the
-// world's viewport
-float Viewer::pixel_size() const {
+// The viewport the camera's own numbers are told from: the world's as the
+// free camera shows it, or the first one that follows it
+const R3DViewport* Viewer::world_viewport() const {
     const R3DViewport* best = nullptr;
-    for (size_t i = 0; i < base_.viewports.size(); i++)
-        if (follows_[i] && (!best || base_.viewports[i].world)) best = &base_.viewports[i];
-    float size = best ? view_pixel_size(*best, layout()) : 0.0f;
+    for (size_t i = 0; i < moved_.viewports.size() && i < follows_.size(); i++)
+        if (follows_[i] && (!best || moved_.viewports[i].world)) best = &moved_.viewports[i];
+    return best;
+}
+
+// The size of a pixel of the window at distance 1 from the camera
+float Viewer::pixel_size() const {
+    const R3DViewport* v = world_viewport();
+    float size = v ? view_pixel_size(*v, layout()) : 0.0f;
     return size > 0 ? size : 0.0015f;
+}
+
+// A wider or a narrower lens than the game's, between 5 and 140 degrees from
+// top to bottom
+void Viewer::widen(float by) {
+    float across = 0, down = 0;
+    if (const R3DViewport* v = world_viewport()) view_angles(*v, layout(), across, down);
+    float lens = cam_.lens * by;
+    if (down > 0) lens = cam_.lens * std::clamp(down * by, 0.0437f, 2.747f) / down;
+    cam_.lens = std::clamp(lens, 0.05f, 20.0f);
 }
 
 // The camera. The right button held turns it with the mouse, W A S D move it
@@ -621,6 +642,13 @@ void Viewer::draw_panel() {
         setting("Viewports", strf("only %d (priority %d%s)", opt_.solo, v.priority, v.world ? ", world" : ""), "V");
     }
     setting("Camera", cam_.moved() ? strf("free, %.0f m/s", speed_) : "the game's", "R");
+    if (const R3DViewport* v = world_viewport()) {
+        float across, down;
+        view_angles(*v, layout(), across, down);
+        const float degrees = 2 * 57.29578f;
+        setting("Field of view", strf("%.0f x %.0f deg%s", std::atan(across) * degrees, std::atan(down) * degrees,
+                                      cam_.lens == 1 ? " (the game's)" : ""), "- +");
+    }
     y += lh / 2;
 
     const int bottom = client_h_ - pad - 6 * lh;   // the help and the status line below
@@ -659,7 +687,7 @@ void Viewer::draw_panel() {
     line("Right button: look (wheel: speed)   W A S D Q E: fly", DIM);
     line("Alt + left, middle, right button: orbit, pan, zoom", DIM);
     line("Wheel: zoom   F: go to the model   Esc: let go", DIM);
-    line("Shift: faster   Ctrl: slower   R: the game's camera", DIM);
+    line("Shift: faster   Ctrl: slower   - +: field of view", DIM);
     line("X: save textures   O: open   F12: shot   Tab: panel", DIM);
     if (!status_.empty()) {
         // (what does not fit is in the console)

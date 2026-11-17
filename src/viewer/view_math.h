@@ -30,6 +30,9 @@ struct ViewLayout {
 struct ViewCamera {
     float pos[3] = {0, 0, 0};
     float rot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};   // its right, up and back axes
+    // How much wider than the game's its view is: the tangent of its half
+    // angle over the game's (2: twice as much of the scene at any distance)
+    float lens = 1;
 
     void reset() { *this = ViewCamera{}; }
     bool moved() const;
@@ -55,8 +58,8 @@ void view_world_up(const R3DScene& scene, float up[3]);
 // world viewport (menus) every one follows
 std::vector<uint8_t> view_follows(const R3DScene& scene);
 
-// `base` as `cam` sees it: the vertices, the culled faces and the lights of
-// the viewports that follow
+// `base` as `cam` sees it: the vertices, the culled faces, the lights and the
+// projection of the viewports that follow
 void view_move(const R3DScene& base, const ViewCamera& cam, const std::vector<uint8_t>& follows, R3DScene& out);
 
 enum class ViewMode { Normal, Flat, Wire };
@@ -92,6 +95,11 @@ struct ViewPick {
 // The view ray through a point of the window, in the viewport's own view
 // space (from the origin; z = -1). false outside the viewport
 bool view_ray(const R3DViewport& v, const ViewLayout& lay, float win_x, float win_y, float dir[3]);
+
+// The tangents of half the angle a viewport shows, across and down, in a 3D
+// view of this layout (the renderer shows more to the sides of a full-screen
+// viewport when the view is wider than 4:3)
+void view_angles(const R3DViewport& v, const ViewLayout& lay, float& across, float& down);
 
 // How much of the view one pixel of the window covers, at distance 1 from the
 // camera (times the distance: the size of a pixel there)

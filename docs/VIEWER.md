@@ -58,7 +58,8 @@ they are for your own use and are not to be shared.
 | Mouse wheel with the right button held | flying speed |
 | Left click | select the model under the pointer |
 | F | go to the selected model |
-| R | back to the game's camera |
+| -, + | a narrower or a wider field of view than the game's |
+| R | back to the game's camera and its field of view |
 | 1, 2, 3 | textured, without textures, wire frame |
 | B | the faces the game's camera could not see, on or off |
 | H | the HUD (the 2D layer in front and the 3D gauges), on or off |

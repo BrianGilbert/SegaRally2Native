@@ -339,6 +339,25 @@ static void test_scene() {
     float lower[3];
     CHECK(view_ray(v, lay, 496, 300, dir) && view_ray(v, lay, 496, 301, lower));
     CHECK(view_pixel_size(v, lay) > 0 && close_to(std::fabs(lower[1] - dir[1]), view_pixel_size(v, lay), 1e-6f));
+    // A wider lens: the same pixel covers that much more, and the ray to the
+    // edge of the picture leans out that much more
+    {
+        ViewCamera wide;
+        CHECK(!wide.moved());
+        wide.lens = 2;
+        CHECK(wide.moved());
+        R3DScene wider;
+        view_move(base, wide, follows, wider);
+        const R3DViewport& w = wider.viewports[0];
+        CHECK(close_to(view_pixel_size(w, lay), 2 * view_pixel_size(v, lay), 1e-6f));
+        float across, down, across2, down2, edge[3], edge2[3];
+        view_angles(v, lay, across, down);
+        view_angles(w, lay, across2, down2);
+        CHECK(across > 0 && down > 0 && close_to(across2, 2 * across) && close_to(down2, 2 * down));
+        CHECK(view_ray(v, lay, 496, 1, edge) && view_ray(w, lay, 496, 1, edge2));
+        CHECK(close_to(edge2[1], 2 * edge[1]) && close_to(std::fabs(edge[1]), down, 0.01f));
+        for (size_t i = 0; i < wider.vertices.size(); i++) CHECK(memcmp(wider.vertices[i].pos, base.vertices[i].pos, 12) == 0);
+    }
     float x, y;
     to_window(v, lay, a.origin, x, y);
     CHECK(close_to(x, 496) && close_to(y, 384));
