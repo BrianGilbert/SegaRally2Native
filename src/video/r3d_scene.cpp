@@ -587,8 +587,7 @@ uint32_t R3DSceneBuilder::instance_key(uint32_t model_addr) {
     return r3d_mix_key(k, instance_count_[k]++);   // the same model drawn again through the same path
 }
 
-// SR2_COPIES_AS_IS: copies paired by their place in the view alone, and
-// heads followed as wheels, as before (to compare)
+// SR2_COPIES_AS_IS: copies paired by their place in the view alone, as before (to compare)
 static const bool copies_as_is = getenv("SR2_COPIES_AS_IS") != nullptr;
 
 // Copies of one model (the ammo counter's cartridges) are told apart by the
@@ -821,33 +820,6 @@ void R3DSceneBuilder::pair_copies(const R3DScene& out) {
                                        {in.world[0], in.world[1], in.world[2]}, in.has_world});
 }
 
-// Whether a model turns about a point away from its middle (its origin more
-// than a quarter of its size from the middle of its corners): a head on its
-// neck (Sega Rally 2's: 13 to 26 cm from the middle of a head 33 to 38 cm
-// across, as the camera sees it), not a wheel on its hub
-static bool turns_off_centre(const R3DInstance& in, size_t vi, const R3DScene& out) {
-    const R3DViewport* vp = nullptr;
-    for (const R3DViewport& v : out.viewports)
-        if (v.build_index == vi) vp = &v;
-    if (!vp) return false;
-    float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
-    auto take = [&](uint32_t first, uint32_t from, uint32_t to) {
-        for (uint32_t k = from; k < to && first + k < out.vertices.size(); k++)
-            for (int c = 0; c < 3; c++)
-                lo[c] = std::min(lo[c], out.vertices[first + k].pos[c]), hi[c] = std::max(hi[c], out.vertices[first + k].pos[c]);
-    };
-    take(vp->opaque_first, in.opaque[0], in.opaque[1]);
-    take(vp->trans_first, in.trans[0], in.trans[1]);
-    if (lo[0] > hi[0]) return false;
-    float d = 0, size = 0;
-    for (int c = 0; c < 3; c++) {
-        float m = 0.5f * (lo[c] + hi[c]) - in.origin[c];
-        d += m * m;
-        size = std::max(size, hi[c] - lo[c]);
-    }
-    return std::sqrt(d) > 0.25f * size;
-}
-
 // Fills R3DVertex::prev from the previous frame. Vertices that are new, or
 // jumped too far (a camera cut, a reused model), are not interpolated.
 // Neither are models that turned a lot since the previous frame (wheels):
@@ -872,14 +844,6 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
             float trace = 0;
             for (int i = 0; i < 9; i++) trace += a[i] * it->second[i];
             if (trace >= 1.0f + 2.0f * 0.866f) continue;   // (up to 30 degrees: its corners are followed one by one)
-            // ... a driver's head too, up to 90 degrees: it nods on its neck, its
-            // origin, below it (a wheel turns about its middle). Sega Rally 2's
-            // heads swing up to 40 degrees a frame after each cut of the attract
-            // (the game's own); kept as a wheel's, they jumped from one frame's
-            // pose to the next, up to 17 cm, instead of swinging between them.
-            // Followed corner by corner they dip a little towards the neck half
-            // way (2 cm at 40 degrees)
-            if (in.ride_on && trace > 1.0f && !copies_as_is && turns_off_centre(in, vi, out)) continue;
             // A wheel: between two frames its corners would cut across the
             // circle they turn on (the wheel shrinking and swelling), so it
             // keeps this frame's shape; but it travels with its car, by as
