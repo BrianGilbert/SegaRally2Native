@@ -10,11 +10,12 @@
 
 #include "r3d_scene.h"
 
-// Two models turned the same way (their axes in view space)
-static bool same_axes(const float* a, const float* b) {
-    for (int i = 0; i < 9; i++)
-        if (std::fabs(a[i] - b[i]) > 0.01f) return false;
-    return true;
+// The game's dark patch under a car (its shadow): a model of see-through,
+// black, self-lit, untextured polygons only
+static bool is_patch(const R3DInstance& in, const R3DScene& out, const R3DViewport& v) {
+    if (in.opaque[1] > in.opaque[0] || in.trans[1] <= in.trans[0]) return false;
+    const R3DVertex& x0 = out.vertices[v.trans_first + in.trans[0]];
+    return (x0.flags & (R3D_LUMINOUS | R3D_TEXTURED)) == R3D_LUMINOUS && (x0.color & 0x00FFFFFFu) == 0;
 }
 
 // Sega Rally 2 (not in the original): the roadside boards, fences and walls
@@ -41,7 +42,7 @@ static void settle_scenery(const std::vector<R3DInstance>& list, const float* ax
     std::vector<uint32_t> upright;                      // first vertex of each
     auto cell_key = [&](int cu, int cw) { return (uint64_t(uint32_t(cu)) << 32) | uint32_t(cw); };
     for (const R3DInstance& in : list) {
-        if (!same_axes(in.axes, axes)) continue;
+        if (!r3d_same_axes(in.axes, axes)) continue;
         for (uint32_t i = in.opaque[0]; i + 2 < in.opaque[1]; i += 3) {
             const R3DVertex* t = &out.vertices[v.opaque_first + i];
             if (t[0].flags & (R3D_ACTOR | R3D_LUMINOUS)) continue;
@@ -126,7 +127,7 @@ static void ground_under(const std::vector<R3DInstance>& list, const float* axes
     for (size_t m = 0; m < queries.size(); m++) cells.push_back({cell_of(queries[m].u, queries[m].w), int(m)});
     std::sort(cells.begin(), cells.end());
     for (const R3DInstance& in : list) {
-        if (!same_axes(in.axes, axes)) continue;
+        if (!r3d_same_axes(in.axes, axes)) continue;
         for (uint32_t i = in.opaque[0]; i + 2 < in.opaque[1]; i += 3) {
             const R3DVertex* t = &out.vertices[v.opaque_first + i];
             if (t[0].flags & R3D_ACTOR) continue;   // (a car turned the scenery's way, settle_cars)
@@ -185,7 +186,13 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
         float raw = 0;                     // the last measurement
         uint64_t seen = 0, measured = 0;   // frames
         float at[3] = {0, 0, 0};           // where its patch was
-        std::vector<uint32_t> pieces;      // the car's models (their keys), for the frames its patch is not drawn
+        // The car's models, for the frames its patch is not drawn: their keys,
+        // and their model and place last frame (a key the game changes)
+        struct Piece {
+            uint32_t key, model;
+            float at[3];
+        };
+        std::vector<Piece> pieces;
     };
     static std::unordered_map<uint64_t, Lift> lifts;
     if (off) return;
@@ -204,10 +211,7 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
     std::vector<GroundQuery> queries;
     for (size_t n = 0; n < list.size(); n++) {
         const R3DInstance& in = list[n];
-        if (same_axes(in.axes, axes) || in.opaque[1] > in.opaque[0] || in.trans[1] <= in.trans[0]) continue;
-        if (dot(in.origin, in.origin) > reach * reach) continue;
-        const R3DVertex& x0 = out.vertices[v.trans_first + in.trans[0]];
-        if ((x0.flags & (R3D_LUMINOUS | R3D_TEXTURED)) != R3D_LUMINOUS || (x0.color & 0x00FFFFFFu) != 0) continue;
+        if (r3d_same_axes(in.axes, axes) || !is_patch(in, out, v) || dot(in.origin, in.origin) > reach * reach) continue;
         Car c{n, {1e30f, 1e30f, 1e30f}, {-1e30f, -1e30f, -1e30f}, queries.size(), 0, 0, (uint64_t(in.key) << 32) | in.model};
         for (uint32_t i = in.trans[0]; i < in.trans[1]; i++) {
             const R3DVertex& x = out.vertices[v.trans_first + i];
@@ -223,8 +227,13 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
         c.end = queries.size();
         cars.push_back(c);
     }
+    // A car's lift is kept for a second without its patch: the desert demo's
+    // jump lasts 35 frames, and with half a second the car came up 14 cm for its
+    // last frames in the air, then dropped 16 cm onto the road in one frame
+    // as it landed. SR2_LIFT_HOLD=N: N frames (30 before, to compare)
+    static const uint64_t hold = getenv("SR2_LIFT_HOLD") ? uint64_t(atoi(getenv("SR2_LIFT_HOLD"))) : 60;
     for (auto it = lifts.begin(); it != lifts.end();)
-        it = out.frame - it->second.seen > 30 ? lifts.erase(it) : std::next(it);
+        it = out.frame - it->second.seen > hold ? lifts.erase(it) : std::next(it);
     if (cars.empty() && lifts.empty()) return;
     // A car driving straight along one of the world's axes is turned exactly
     // the scenery's way: its bodywork, glass and shine (the models placed at
@@ -242,7 +251,7 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
         std::vector<std::pair<std::array<int32_t, 3>, size_t>> over;   // (origin in cm, instance)
         for (size_t n = 0; n < list.size(); n++) {
             const R3DInstance& in = list[n];
-            if (!same_axes(in.axes, axes)) continue;
+            if (!r3d_same_axes(in.axes, axes)) continue;
             float u = dot(in.origin, ax), h = dot(in.origin, up), w = dot(in.origin, az);
             if (u < c.lo[0] - 0.5f || u > c.hi[0] + 0.5f || w < c.lo[2] - 0.5f || w > c.hi[2] + 0.5f) continue;
             if (h < c.lo[1] - 1.0f || h > c.hi[1] + 4.0f) continue;
@@ -297,7 +306,7 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
         for (int k = 0; k < 3; k++) at[k] = 0.5f * (c.lo[k] + c.hi[k]), moved = std::max(moved, std::fabs(at[k] - lift.at[k]));
         // (another camera, another moment of the demo: nothing to follow on from)
         uint64_t frames = out.frame - lift.seen;
-        if (frames > 30 || moved > 3.0f * float(frames)) lift.height = -1, lift.skips = 0;
+        if (frames > hold || moved > 3.0f * float(frames)) lift.height = -1, lift.skips = 0;
         lift.seen = out.frame;
         lift.pieces.clear();
         memcpy(lift.at, at, sizeof at);
@@ -327,10 +336,40 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
             printf("[car] frame %llu world car %06X at %.1f %.1f %.1f corners %zu raw %.3f down %.3f\n",
                    (unsigned long long)out.frame, in.model, at[0], at[1], at[2], gaps.size(), raw, c.down);
     }
-    std::unordered_map<uint32_t, float> held;
-    for (const auto& [key, lift] : lifts)
+    // The models of the cars not drawn over their patch this frame
+    struct Held {
+        Lift::Piece* piece;
+        float height;
+        bool claimed;
+    };
+    std::vector<Held> held;
+    std::unordered_map<uint32_t, size_t> held_keys;
+    for (auto& [key, lift] : lifts)
         if (lift.seen != out.frame && lift.height > -0.5f)
-            for (uint32_t piece : lift.pieces) held[piece] = lift.height;
+            for (Lift::Piece& piece : lift.pieces) held_keys[piece.key] = held.size(), held.push_back({&piece, lift.height, false});
+    // Each model is one of them by its key, or else by its model and place
+    // (within 3 m of where that one was last frame): the game hands a car's
+    // models other keys now and then (the mountain demo's car far down the
+    // road: its bodywork lost its lift every other frame, 16 cm up and down)
+    std::vector<int> held_as(list.size(), -1);
+    if (!held.empty()) {
+        for (size_t n = 0; n < list.size(); n++) {
+            auto it = held_keys.find(list[n].key);
+            if (it != held_keys.end() && !held[it->second].claimed) held_as[n] = int(it->second), held[it->second].claimed = true;
+        }
+        for (size_t n = 0; n < list.size(); n++) {
+            const R3DInstance& in = list[n];
+            if (held_as[n] >= 0) continue;
+            float best = 3.0f * 3.0f;
+            for (size_t h = 0; h < held.size(); h++) {
+                const Held& c = held[h];
+                if (c.claimed || c.piece->model != in.model) continue;
+                float d[3] = {in.origin[0] - c.piece->at[0], in.origin[1] - c.piece->at[1], in.origin[2] - c.piece->at[2]};
+                if (dot(d, d) < best) best = dot(d, d), held_as[n] = int(h);
+            }
+            if (held_as[n] >= 0) held[held_as[n]].claimed = true;
+        }
+    }
     // Each model drawn over a patch (its origin: the car's, a wheel's) is that
     // car's. A patch with no car over it is left alone: in a race the cars near
     // the camera are in viewports of their own, over patches in the world like
@@ -350,7 +389,7 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
     std::vector<uint32_t> shine(cars.size(), 0);
     for (size_t n = 0; n < list.size(); n++) {
         const R3DInstance& in = list[n];
-        if (same_axes(in.axes, axes) && aligned[n] < 0) continue;
+        if (r3d_same_axes(in.axes, axes) && aligned[n] < 0) continue;
         float u = dot(in.origin, ax), h = dot(in.origin, up), w = dot(in.origin, az);
         float nearest = 1e30f;
         owner[n] = aligned[n];
@@ -369,26 +408,127 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
             for (uint32_t k = in.opaque[0]; k < in.opaque[1]; k++)
                 if (out.vertices[v.opaque_first + k].flags & R3D_SPECULAR) shine[owner[n]]++;
     }
+    // ... and only over a car of the world's own: its bodywork (a model of 200
+    // polygons and more) right over the middle of the patch. The player's car
+    // (and a rival near it) is drawn in a viewport of its own over a patch in
+    // the world, which R3DSceneBuilder::settle_player_car measures; at the
+    // start a rival in the world beside it reached over the edge of that patch
+    // with shine enough to be taken for its car: the patch went down here, the
+    // player's car went down with it until it lost its shadow, then sprang
+    // back up once the rival had gone
+    for (size_t i = 0; i < cars.size(); i++) {
+        const Car& c = cars[i];
+        float cu = 0.5f * (c.lo[0] + c.hi[0]), cw = 0.5f * (c.lo[2] + c.hi[2]);
+        bool body = false;
+        for (size_t n = 0; n < list.size() && !body; n++) {
+            const R3DInstance& in = list[n];
+            if (owner[n] != int(i) || in.polygons < 200 || in.opaque[1] <= in.opaque[0]) continue;
+            float du = dot(in.origin, ax) - cu, dw = dot(in.origin, az) - cw;
+            body = du * du + dw * dw < 1.0f;
+        }
+        if (!body) shine[i] = 0;
+    }
+    std::vector<float> downs(list.size(), 0.0f);
     for (size_t n = 0; n < list.size(); n++) {
         const R3DInstance& in = list[n];
-        if (same_axes(in.axes, axes) && aligned[n] < 0 && !held.count(in.key)) continue;
+        if (r3d_same_axes(in.axes, axes) && aligned[n] < 0 && held_as[n] < 0) continue;
         float down = 0;
         if (owner[n] >= 0) {
             const Car& c = cars[owner[n]];
             if (shine[owner[n]] < 1500) continue;
             down = c.down - (n == c.patch ? 0.03f : 0.0f);   // (the patch on the road itself would flicker through it)
-            lifts[c.lift].pieces.push_back(in.key);
+            lifts[c.lift].pieces.push_back({in.key, in.model, {in.origin[0], in.origin[1], in.origin[2]}});
         } else {
             // ... or was a car's while its patch was drawn, a moment ago (the game leaves the patch out now and then)
-            auto it = held.find(in.key);
-            if (it == held.end()) continue;
-            down = it->second;
+            if (held_as[n] < 0) continue;
+            Lift::Piece& piece = *held[held_as[n]].piece;
+            piece.key = in.key;   // (followed from here)
+            memcpy(piece.at, in.origin, sizeof piece.at);
+            down = held[held_as[n]].height;
         }
         taken[n] = 1;
-        if (aligned[n] < 0 && same_axes(in.axes, axes)) {   // (held: a car's turned the scenery's way)
+        downs[n] = down;
+        if (aligned[n] < 0 && r3d_same_axes(in.axes, axes)) {   // (held: a car's turned the scenery's way)
             for (uint32_t k = in.opaque[0]; k < in.opaque[1]; k++) out.vertices[v.opaque_first + k].flags |= R3D_ACTOR;
             for (uint32_t k = in.trans[0]; k < in.trans[1]; k++) out.vertices[v.trans_first + k].flags |= R3D_ACTOR;
         }
+    }
+    // What rides in a car goes down with it, by exactly as much: the drivers'
+    // heads, the wheels, the glass. While the patch is not drawn (the car in
+    // the air: the desert demo's jump) the car's models were found by the keys
+    // they had a moment ago, and the heads are drawn through other nodes from
+    // one frame to the next (a new key almost every frame): left at the game's
+    // height while the bodywork went down, they rose 14 cm out of their necks
+    // until the car landed (and the wheels with them). A model turned its own
+    // way (not scenery, not a sprite, not the patch) whose origin is inside a
+    // car's bodywork, its box in the bodywork's own axes, goes down as that
+    // bodywork does: the closest fitting model round it. A bodywork this does
+    // not set down (a car with no patch, near the camera: settle_actors grounds
+    // it) takes its riders along there instead: the snowy demo's car with one
+    // head held 19 cm over the other. SR2_RIDERS_AS_IS=1: as before (to compare)
+    static const bool riders_as_is = getenv("SR2_RIDERS_AS_IS") != nullptr;
+    struct Body {
+        const R3DInstance* in;
+        float lo[3], hi[3], down;
+        bool taken;
+    };
+    std::vector<Body> bodies;
+    for (size_t n = 0; n < list.size() && !riders_as_is; n++) {
+        const R3DInstance& in = list[n];
+        if (in.polygons < 200 || in.opaque[1] <= in.opaque[0] || (!taken[n] && r3d_same_axes(in.axes, axes))) continue;
+        Body b{&in, {1e30f, 1e30f, 1e30f}, {-1e30f, -1e30f, -1e30f}, downs[n], taken[n] != 0};
+        for (uint32_t k = in.opaque[0]; k < in.opaque[1]; k++) {
+            const float* p = out.vertices[v.opaque_first + k].pos;
+            float d[3] = {p[0] - in.origin[0], p[1] - in.origin[1], p[2] - in.origin[2]};
+            for (int c = 0; c < 3; c++) {
+                float l = dot(d, in.axes + c * 3);
+                b.lo[c] = std::min(b.lo[c], l), b.hi[c] = std::max(b.hi[c], l);
+            }
+        }
+        bodies.push_back(b);
+    }
+    for (size_t n = 0; n < list.size() && !bodies.empty(); n++) {
+        const R3DInstance& in = list[n];
+        if (in.polygons < 8 || is_patch(in, out, v)) continue;
+        bool scenery_way = r3d_same_axes(in.axes, axes);
+        const Body* ride = nullptr;
+        auto size = [](const Body& b) { return (b.hi[0] - b.lo[0]) * (b.hi[1] - b.lo[1]) * (b.hi[2] - b.lo[2]); };
+        for (const Body& b : bodies) {
+            if (b.in == &in || b.in->polygons <= in.polygons || (ride && size(*ride) <= size(b))) continue;
+            // (turned the scenery's way too: a head at rest in a car driving
+            // straight along one of the world's axes, the first frame of a shot
+            // of the desert demo; then all of it inside the bodywork, as no
+            // piece of the road or the scenery around the car is)
+            if (scenery_way && !r3d_same_axes(in.axes, b.in->axes)) continue;
+            auto inside = [&](const float* p) {
+                float d[3] = {p[0] - b.in->origin[0], p[1] - b.in->origin[1], p[2] - b.in->origin[2]};
+                for (int c = 0; c < 3; c++) {
+                    float l = dot(d, b.in->axes + c * 3);
+                    if (l < b.lo[c] - 0.1f || l > b.hi[c] + 0.1f) return false;
+                }
+                return true;
+            };
+            bool in_car = inside(in.origin);
+            for (uint32_t k = in.opaque[0]; k < in.opaque[1] && in_car && scenery_way; k++) in_car = inside(out.vertices[v.opaque_first + k].pos);
+            for (uint32_t k = in.trans[0]; k < in.trans[1] && in_car && scenery_way; k++) in_car = inside(out.vertices[v.trans_first + k].pos);
+            if (in_car) ride = &b;
+        }
+        if (!ride) continue;
+        if (!ride->taken) {
+            if (in.polygons < 200) taken[n] = 0, downs[n] = 0;   // (with its bodywork, settle_actors)
+            continue;
+        }
+        taken[n] = 1;
+        downs[n] = ride->down;
+        if (scenery_way) {   // (a car's: not ground, lit and shadowed as a car)
+            for (uint32_t k = in.opaque[0]; k < in.opaque[1]; k++) out.vertices[v.opaque_first + k].flags |= R3D_ACTOR;
+            for (uint32_t k = in.trans[0]; k < in.trans[1]; k++) out.vertices[v.trans_first + k].flags |= R3D_ACTOR;
+        }
+    }
+    for (size_t n = 0; n < list.size(); n++) {
+        if (!taken[n]) continue;
+        const R3DInstance& in = list[n];
+        float down = downs[n];
         if (std::fabs(down) <= 0.002f) continue;
         auto lower = [&](R3DVertex& x) {
             for (int k = 0; k < 3; k++) x.pos[k] -= down * up[k], x.prev[k] -= down * up[k];
@@ -427,7 +567,7 @@ static void settle_actors(const std::vector<R3DInstance>& list, const float* axe
     std::vector<Piece> pieces;
     for (size_t n = 0; n < list.size(); n++) {
         const R3DInstance& in = list[n];
-        if (taken[n] || same_axes(in.axes, axes)) continue;
+        if (taken[n] || r3d_same_axes(in.axes, axes)) continue;
         bool solid = in.opaque[1] > in.opaque[0];
         if (!solid && in.trans[1] <= in.trans[0]) continue;
         if (dot(in.origin, in.origin) > reach * reach) continue;
@@ -454,7 +594,14 @@ static void settle_actors(const std::vector<R3DInstance>& list, const float* axe
                 if (pieces[i].lo[k] > pieces[j].hi[k] + 0.1f || pieces[j].lo[k] > pieces[i].hi[k] + 0.1f) touch = false;
             if (touch) pieces[root(int(i))].group = root(int(j));
         }
-    // Each model's lowest point (of its solid polygons), and the scenery under it
+    // Each model's lowest point (of its solid polygons), and the scenery under
+    // it: the lowest under any of its corners within 2 cm of the lowest (on a
+    // slope the corner downhill touches it, the one uphill is in the bank). A
+    // flat foot has several (a board's bottom edge), and which of them came
+    // out lowest changed from frame to frame with the rounding of the view:
+    // over a sloping verge each one stood over other ground, and the chevron
+    // boards at the bends of the mountain demo were set down and raised by up
+    // to 34 cm frame after frame (rising out of the ground and sinking back)
     std::vector<int> model_of(pieces.size(), -1);
     std::vector<GroundQuery> models;
     std::vector<int> index(pieces.size(), -1);
@@ -470,7 +617,26 @@ static void settle_actors(const std::vector<R3DInstance>& list, const float* axe
             if (h < m.h) m.h = h, m.u = dot(x.pos, ax), m.w = dot(x.pos, az);
         }
     }
-    ground_under(list, axes, out, v, models);
+    std::vector<GroundQuery> feet;
+    std::vector<int> foot_of;
+    std::vector<int> feet_of_model(models.size(), 0);
+    for (size_t i = 0; i < pieces.size(); i++) {
+        const R3DInstance& in = *pieces[i].in;
+        int mi = model_of[i];
+        for (uint32_t k = in.opaque[0]; k < in.opaque[1] && feet_of_model[mi] < 32; k++) {
+            const R3DVertex& x = out.vertices[v.opaque_first + k];
+            float h = dot(x.pos, up);
+            if (h > models[mi].h + 0.02f) continue;
+            feet.push_back({dot(x.pos, ax), h, dot(x.pos, az)});
+            foot_of.push_back(mi);
+            feet_of_model[mi]++;
+        }
+    }
+    ground_under(list, axes, out, v, feet);
+    for (size_t f = 0; f < feet.size(); f++) {
+        float& g = models[foot_of[f]].ground;
+        if (feet[f].ground > -1e29f) g = g > -1e29f ? std::min(g, feet[f].ground) : feet[f].ground;
+    }
     static const bool log = getenv("SR2_ACTORLOG") != nullptr;
     for (size_t i = 0; i < pieces.size(); i++) {
         const GroundQuery& m = models[model_of[i]];
@@ -514,7 +680,7 @@ void R3DWorldTracker::track(const std::vector<std::vector<R3DInstance>>& viewpor
             uint32_t was = tracking_ && scenery_models_.count(list[i].model) ? 1 : 0;
             bool found = false;
             for (auto& g : groups)
-                if (same_axes(list[g.first].axes, list[i].axes)) {
+                if (r3d_same_axes(list[g.first].axes, list[i].axes)) {
                     g.polygons += list[i].polygons;
                     g.was_scenery += was;
                     found = true;
@@ -557,7 +723,7 @@ void R3DWorldTracker::track(const std::vector<std::vector<R3DInstance>>& viewpor
     if (best >= 0) {
         std::unordered_map<uint32_t, uint32_t> seen;
         for (const R3DInstance& in : viewport_instances[best])
-            if (same_axes(in.axes, axes)) {
+            if (r3d_same_axes(in.axes, axes)) {
                 scenery_models_.insert(in.model);
                 Placement p;
                 memcpy(p.origin, in.origin, sizeof(p.origin));
@@ -673,7 +839,7 @@ void R3DWorldTracker::track(const std::vector<std::vector<R3DInstance>>& viewpor
     // which would push the haze out to where nothing is
     std::vector<float> dists;
     for (const R3DInstance& in : viewport_instances[best]) {
-        if (!same_axes(in.axes, axes)) continue;
+        if (!r3d_same_axes(in.axes, axes)) continue;
         for (uint32_t i = in.opaque[0]; i + 2 < in.opaque[1]; i += 3) {
             const float* p = out.vertices[v.opaque_first + i].pos;
             dists.push_back(std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]));
@@ -698,7 +864,7 @@ void R3DWorldTracker::track(const std::vector<std::vector<R3DInstance>>& viewpor
     // Models not aligned with the scenery move on their own (dinosaurs, people,
     // vehicles): the rim light outlines them, never the scenery
     for (const R3DInstance& in : viewport_instances[best]) {
-        if (same_axes(in.axes, axes)) continue;
+        if (r3d_same_axes(in.axes, axes)) continue;
         for (uint32_t i = in.opaque[0]; i < in.opaque[1]; i++) out.vertices[v.opaque_first + i].flags |= R3D_ACTOR;
         for (uint32_t i = in.trans[0]; i < in.trans[1]; i++) out.vertices[v.trans_first + i].flags |= R3D_ACTOR;
     }
