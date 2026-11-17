@@ -309,9 +309,62 @@ elseif(WIN32)
     endif()
 endif()
 
+# The capture viewer (src/viewer, docs/VIEWER.md): a snapshot of the game (F9)
+# seen from a free camera, drawn by the game's own scene builder and renderer.
+# A program of its own that links none of the recompiled code, so it builds
+# without the ROM. Not built with the rest: build_viewer.bat, or
+# cmake --build <build folder> --target SegaRally2Viewer.
+# A console program: what it loads and what is selected is also printed
+add_executable(SegaRally2Viewer EXCLUDE_FROM_ALL
+    src/viewer/viewer_main.cpp
+    src/viewer/capture.cpp
+    src/viewer/panel.cpp
+    src/viewer/textures.cpp
+    src/viewer/view_math.cpp
+    src/video/tilegen.cpp
+    src/video/texture_pack.cpp
+    src/video/pack2d.cpp
+    src/video/sky_pack.cpp
+    src/video/text_hd.cpp
+    src/video/image_io.cpp
+    src/video/dlss_stub.cpp
+    src/video/vk_presenter.cpp
+    src/video/ui_overlay.cpp
+    src/video/r3d_state.cpp
+    src/video/r3d_scene.cpp
+    src/video/r3d_screen.cpp
+    src/video/r3d_dust.cpp
+    src/video/r3d_world.cpp
+    src/video/r3d_renderer.cpp
+    src/video/r3d_raytrace.cpp
+    third_party/volk/volk.c
+    $<TARGET_OBJECTS:SegaRally2_res>
+)
+add_dependencies(SegaRally2Viewer shaders)
+if(GAME_IN_SOURCE_DIR)
+    set_target_properties(SegaRally2Viewer PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
+target_include_directories(SegaRally2Viewer PRIVATE
+    ${SHADER_OUT}
+    src/viewer
+    src/video
+    third_party/vulkan-headers/include
+    third_party/volk
+    third_party/ngx/include
+)
+target_compile_definitions(SegaRally2Viewer PRIVATE VK_NO_PROTOTYPES VK_USE_PLATFORM_WIN32_KHR)
+target_link_libraries(SegaRally2Viewer PRIVATE winmm ole32 oleaut32 windowscodecs gdi32 dwmapi shell32 comdlg32)
+if(MSVC)
+    target_compile_options(SegaRally2Viewer PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W4 /wd4146 /fp:strict /utf-8>)
+    target_compile_definitions(SegaRally2Viewer PRIVATE _CRT_SECURE_NO_WARNINGS)
+elseif(WIN32)
+    # (the renderer's code as the game builds it)
+    target_compile_options(SegaRally2Viewer PRIVATE -ffp-contract=off -fno-strict-aliasing -fwrapv)
+endif()
+
 # Unit tests (ctest): the 2D composition against golden hashes, the FNV-1a
 # hash of C++ and Python against the same vectors, the command-line table and
-# the audio queue and the ROM layout read from the zip.
+# the audio queue, the ROM layout read from the zip and the capture viewer.
 # build.bat runs them.
 option(LW_TESTS "Build the unit tests" ON)
 if(LW_TESTS)
@@ -328,8 +381,14 @@ if(LW_TESTS)
     target_include_directories(menu_music_test PRIVATE third_party/minimp3)
     add_executable(achievements_csv_test tests/achievements_csv_test.cpp src/runtime/achievements_csv.cpp)
     target_include_directories(achievements_csv_test PRIVATE ${ICONS_DIR})
+    # The capture viewer without its window: its own code and the game's scene builder
+    add_executable(viewer_test tests/viewer_test.cpp src/viewer/capture.cpp src/viewer/textures.cpp src/viewer/view_math.cpp
+        src/video/r3d_state.cpp src/video/r3d_scene.cpp src/video/r3d_screen.cpp src/video/r3d_dust.cpp src/video/r3d_world.cpp
+        src/video/texture_pack.cpp src/video/image_io.cpp)
+    target_include_directories(viewer_test PRIVATE src/viewer)
+    target_link_libraries(viewer_test PRIVATE ole32 windowscodecs)
     foreach(t tilegen_test fnv_test options_test audio_stream_test rom_zip_test jtag_test r3d_state_test news_test menu_music_test
-            achievements_csv_test)
+            achievements_csv_test viewer_test)
         target_include_directories(${t} PRIVATE src/video src/common src/runtime src/audio src/ui ${MINIZ_DIR})
         if(MSVC)
             target_compile_options(${t} PRIVATE /W4 /utf-8)
@@ -346,6 +405,7 @@ if(LW_TESTS)
     add_test(NAME news COMMAND news_test)
     add_test(NAME menu_music COMMAND menu_music_test)
     add_test(NAME achievements_csv COMMAND achievements_csv_test)
+    add_test(NAME viewer COMMAND viewer_test)
     # 3.10: the version the tools need, so an older Python in PATH is skipped (Star Wars Trilogy issue #51)
     find_package(Python3 3.10 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
