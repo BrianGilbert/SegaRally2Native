@@ -13,6 +13,11 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[27] 17 November 2026
+- Saves now happen in the background, which may help with short hitches when the game runs from an external drive.
+- SELECT CAR: each keyboard press now moves one car, so the middle cars are no longer skipped.
+- The SPECIAL game option now says what it really does: 3 laps per stage instead of 1.
+
 [26] 17 November 2026
 - The drivers' heads no longer wobble inside the cars in the attract demos and replays, and stay on their necks when a car jumps.
 - The red chevron boards at the bends no longer rise out of the ground and sink back.
