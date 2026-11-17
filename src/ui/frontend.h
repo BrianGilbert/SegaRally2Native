@@ -107,7 +107,8 @@ class Frontend {
 public:
     enum class Screen { None, Splash, Main, Options, Pause, Records, Debug, Play };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
-                        QuitToMenu, StartDebug, DisplayChanged, Restart };   // Restart: RESTART NOW   // DisplayChanged: MODE / RESOLUTION to the window
+                        QuitToMenu, StartDebug, DisplayChanged, Restart,
+                        WheelRow, WheelCancel, WheelChoose, WheelClear };   // WheelRow: WHEEL tab row wheel_row, with wheel_dir   // Restart: RESTART NOW   // DisplayChanged: MODE / RESOLUTION to the window
 
     bool init(const std::string& font_dir);
     void shutdown();
@@ -147,6 +148,40 @@ public:
     int refresh_hz = 60;                            // the monitor's (MAX FPS MONITOR)
     bool rt_available = false;   // the GPU can trace rays (RAY TRACING option)
     std::wstring gamepads;  // the pads connected, for the CONTROLS tab ("" = none)
+    // CONTROLS > WHEEL (app.cpp fills them from wheel.h's wheel_rows): choosing a
+    // row gives WheelRow with its number and direction; while a control listens
+    // for the wheel, Esc / BACK gives WheelCancel instead of leaving
+    struct WheelLine {
+        std::wstring group, label, value, hint;   // group: its heading (CONTROLS, FORCE FEEDBACK, ADVANCED)
+        float fill = -1;                          // a setting's bar 0..1, -1 none
+        int meter = 0;                            // what `live` is: 0 none, 1 steering -1..1, 2 pedal 0..1, 3 button
+        float live = 0;                           // (not compared: app.cpp redraws for it on the WHEEL tab only)
+        bool operator==(const WheelLine& o) const {
+            return group == o.group && label == o.label && value == o.value && hint == o.hint && fill == o.fill &&
+                   meter == o.meter;
+        }
+    };
+    // A control listening, or WHEEL SETUP: a window over the WHEEL tab (wheel.h's
+    // WheelPrompt); Left / Right pick one of its choices, Enter gives WheelChoose
+    // with wheel_choice, Esc / BACK WheelCancel
+    struct WheelPromptView {
+        bool on = false;
+        int icon = 0;   // WheelPrompt::Icon
+        std::wstring kicker, title, action, hint, glyph, moving, done, note;
+        int gear = 0, step = 0, steps = 0;
+        float progress = 0, time_left = -1, done_age = -1;
+        std::vector<std::wstring> lines, choices;
+    } wheel_prompt;
+    int wheel_choice = 0;
+    std::vector<WheelLine> wheel_lines;
+    struct WheelLive {   // the wheel and pedals now, drawn in the WHEEL tab's panel
+        bool on = false;
+        float steer = 0, gas = 0, brake = 0, handbrake = 0;   // -1..1, 0..1
+        int gear = -1;                                        // H shifter: -1 none, 0 neutral
+    } wheel_live;
+    bool showing_wheel() const { return screen_ == Screen::Options && tab_ == WHEEL_TAB; }
+    bool wheel_listening = false;
+    int wheel_row = -1, wheel_dir = 0;
     bool pad_prompts = false;   // a gamepad drives the menu: its buttons in the key help and hints, not the keyboard's
 
     // At launch: news.txt from GitHub in the background (when the settings
@@ -191,7 +226,8 @@ private:
         OPT_DISPLAY, OPT_VOLUME, OPT_MUSIC, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SUN, OPT_SHADOWS, OPT_SOFT, OPT_HDR, OPT_SHARPEN, OPT_HUD, OPT_LIVERIES,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_VIBRATION, OPT_RT, OPT_MENU_MUSIC, OPT_REFLECT, OPT_GI, OPT_DUST, OPT_UPDATES,
         OPT_DIFFICULTY, OPT_CONNECTED, OPT_TRIGGERS, OPT_RESOLUTION, OPT_SCALE, OPT_VSYNC, OPT_MAXFPS, OPT_BGFPS,
-        OPT_EXPERIENCE, OPT_ASPECT, OPT_ARCADE_ASPECT,   // OPT_ARCADE_ASPECT: ARCADE ORIGINAL's, under EXPERIENCE
+        OPT_EXPERIENCE, OPT_ASPECT, OPT_ARCADE_ASPECT,
+        OPT_WHEEL,   // CONTROLS > WHEEL: one row per wheel_lines entry (Item::index)   // OPT_ARCADE_ASPECT: ARCADE ORIGINAL's, under EXPERIENCE
     };
     struct Item {
         Id id;
@@ -251,6 +287,15 @@ private:
     Picture backdrop_, logo_, credit_;   // (backdrop_: always one, the drawn placeholder if no picture)
     void picture(const Picture& p, int x0, int y0, int x1, int y1, float anchor_x = 0.5f);   // covering the box, opaque
     void sprite(const Picture& p, int x0, int y0, int w, int h);      // with its transparency
+    // The WHEEL tab's pictures (res/wheel/): each with its halvings, so any size
+    // stays smooth; empty when missing (the drawn ones then)
+    struct Pictures { std::vector<Picture> mip; bool ok() const { return !mip.empty() && mip[0].w > 0; } };
+    struct WheelArt { Pictures wheel, gas, brake, handbrake, handbrake_base; bool loaded = false; } wheel_art_;
+    const WheelArt& wheel_art();
+    // A picture w x h with its point (pu, pv) (0..1 of it) at (cx, cy), turned deg
+    // (clockwise), alpha; tint: from tint_v down (0..1 of it), its colours towards rgb
+    void sprite_turned(const Pictures& p, float cx, float cy, float w, float h, float pu, float pv, float deg,
+                       float alpha, uint32_t tint = 0, float tint_v = 2.0f, float tint_amount = 0.0f);
     // The gamepad's buttons in the key help (res/pad/<button>.png, CC0); w = 0:
     // none, a drawn disc or pill instead
     std::map<std::wstring, Picture> pad_icons_;
@@ -382,8 +427,8 @@ private:
     bool wrap_ = false;
     // Settings sections (tab_of in frontend.cpp says where each option goes),
     // shown as a column at the left of the settings page
-    enum { EXPERIENCE_TAB, DISPLAY_TAB, LIGHTING_TAB, AUDIO_TAB, CONTROLS_TAB };   // LIGHTING_TAB is shown as GRAPHICS
-    static constexpr int TAB_COUNT = 5;
+    enum { EXPERIENCE_TAB, DISPLAY_TAB, LIGHTING_TAB, AUDIO_TAB, CONTROLS_TAB, WHEEL_TAB };   // LIGHTING_TAB is shown as GRAPHICS
+    static constexpr int TAB_COUNT = 6;
     static const wchar_t* const TAB_NAMES[TAB_COUNT];
     static int tab_of(Id id);
     struct OptionTab {
@@ -413,6 +458,17 @@ private:
     // The settings page (Options, also from the pause menu): the sections in a
     // column at the left, the open one's options in groups in the middle, what
     // the chosen one does in a panel at the right, the key help at the bottom
+    void draw_wheel_prompt();   // the window over the WHEEL tab
+    std::vector<RECT> prompt_choices_;   // its choices, for the pointer
+    // Smooth shapes (WHEEL tab): a ring or disc (r0 < 0), a thick line, an arc
+    // (angles in radians, 0 up, clockwise), and a steering wheel turned by deg
+    void aa_ring(float cx, float cy, float r0, float r1, uint32_t rgb, float alpha);
+    void aa_line(float ax, float ay, float bx, float by, float half, uint32_t rgb, float alpha);
+    void aa_arc(float cx, float cy, float r, float half, float a0, float a1, uint32_t rgb, float alpha);
+    void draw_wheel_icon(float cx, float cy, float r, float deg, float dim);
+    const std::wstring& wheel_group(int i) const;   // WHEEL tab: wheel_lines[i]'s heading, fill
+    float wheel_fill(int i) const;
+    int draw_wheel_live(int x, int inner, int y_bottom);   // its panel's drawing; returns its top
     void draw_options_page(const std::vector<Item>& list, bool over_game);
     RECT more_up_{}, more_down_{};   // clickable "more" arrows of a scrolled tab
     std::vector<RECT> tab_rects_;   // a step past the end starts again (clicks on the label)

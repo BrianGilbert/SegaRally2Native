@@ -1222,6 +1222,10 @@ int main(int argc, char** argv) {
                     frontend.open(Frontend::Screen::Main);
                     break;
                 case Frontend::Action::Quit: presenter.close(); break;
+                case Frontend::Action::WheelRow: wheel_row_input(frontend.wheel_row, frontend.wheel_dir); break;
+                case Frontend::Action::WheelCancel: wheel_listen_cancel(); break;
+                case Frontend::Action::WheelChoose: wheel_prompt_choose(frontend.wheel_choice); break;
+                case Frontend::Action::WheelClear: wheel_row_clear(frontend.wheel_row); break;
                 case Frontend::Action::Restart:   // RESTART NOW: saved, closed as on QUIT, started again (end of main)
                     save_settings(s);
                     g_restart = true;
@@ -1451,6 +1455,57 @@ int main(int argc, char** argv) {
                 names += (names.empty() ? L"" : L", ") + std::wstring(wheel_name.begin(), wheel_name.end());
             frontend.gamepads = names;
             frontend.invalidate();
+        }
+        {   // OPTIONS > WHEEL: its rows as wheel.cpp has them now (a control listening, a new setting)
+            if (wheel_listening() && !frontend.active()) wheel_listen_cancel();
+            std::vector<Frontend::WheelLine> lines;
+            auto wide = [](const std::string& t) {   // (Latin-1: the degree sign)
+                std::wstring w;
+                for (char c : t) w += wchar_t((unsigned char)c);
+                return w;
+            };
+            for (const WheelRow& r : wheel_rows())
+                lines.push_back({wide(r.group), wide(r.label), wide(r.value), wide(r.hint), r.fill, r.meter, r.live});
+            bool live_moved = lines.size() != frontend.wheel_lines.size();
+            for (size_t i = 0; !live_moved && i < lines.size(); i++)
+                live_moved = std::fabs(lines[i].live - frontend.wheel_lines[i].live) > 0.01f;
+            if (lines != frontend.wheel_lines || wheel_listening() != frontend.wheel_listening) {
+                frontend.wheel_lines = lines;
+                frontend.wheel_listening = wheel_listening();
+                frontend.invalidate();
+            } else if (live_moved) {   // only what the controls read now: redrawn where it shows
+                frontend.wheel_lines = lines;
+                if (frontend.showing_wheel()) frontend.invalidate();
+            }
+            // The window over the WHEEL tab (a control listening, WHEEL SETUP): redrawn
+            // every frame while it is up, for its moving pictures
+            WheelPrompt wp = wheel_prompt();
+            Frontend::WheelPromptView& view = frontend.wheel_prompt;
+            if (wp.on || view.on) {
+                Frontend::WheelPromptView v;
+                v.on = wp.on;
+                v.icon = int(wp.icon);
+                v.kicker = wide(wp.kicker), v.title = wide(wp.title), v.action = wide(wp.action), v.hint = wide(wp.hint);
+                v.glyph = wide(wp.glyph), v.moving = wide(wp.moving), v.done = wide(wp.done), v.note = wide(wp.note);
+                v.gear = wp.gear, v.step = wp.step, v.steps = wp.steps;
+                v.progress = wp.progress, v.time_left = wp.time_left, v.done_age = wp.done_age;
+                for (const std::string& l : wp.lines) v.lines.push_back(wide(l));
+                for (const std::string& c : wp.choices) v.choices.push_back(wide(c));
+                if (v.title != view.title || v.action != view.action || v.choices != view.choices)
+                    frontend.wheel_choice = 0;   // a new step: its first choice
+                view = v;
+                frontend.invalidate();
+            }
+            // The WHEEL tab's drawing follows the wheel and the pedals
+            const WheelLive& lv = wheel_live();
+            Frontend::WheelLive& live_shown = frontend.wheel_live;
+            bool moved = lv.on != live_shown.on || lv.gear != live_shown.gear || std::fabs(lv.steer - live_shown.steer) > 0.004f ||
+                         std::fabs(lv.gas - live_shown.gas) > 0.01f || std::fabs(lv.brake - live_shown.brake) > 0.01f ||
+                         std::fabs(lv.handbrake - live_shown.handbrake) > 0.01f;
+            if (moved) {
+                live_shown = {lv.on, lv.steer, lv.gas, lv.brake, lv.handbrake, lv.gear};
+                if (frontend.showing_wheel()) frontend.invalidate();
+            }
         }
         for (PadKey k : g_pads.take_keys()) {   // the menus, as keys (START resumes from the pause menu)
             static const int VK[] = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, 'Q', 'E', 'G'};
