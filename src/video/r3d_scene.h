@@ -194,7 +194,10 @@ private:
         float origin[3];
         float ride[3];
         uint32_t ride_on;
+        float world[3];
+        bool has_world;
     };
+    std::unordered_set<uint32_t> placed_;   // copies the game put somewhere new this frame (pair_copies): they stand still in the world
     std::vector<PrevInstance> prev_instances_;   // for pairing identical copies by place
     void pair_copies(const R3DScene& out);
     std::vector<const R3DInstance*> bases_;      // (pair_copies: the models copies may ride on)
@@ -218,6 +221,8 @@ private:
         float height = -1;
         uint32_t skips = 0;
         uint64_t frame = 0, patch = 0;   // last seen, last measured by its patch
+        float raw = 0;                   // the last measurement
+        bool kerb = false;               // a step under the car is being waited out
     };
     std::unordered_map<uint32_t, CarLift> car_lifts_;   // by the car's viewport
     float fov_widened_ = 1.0f;
