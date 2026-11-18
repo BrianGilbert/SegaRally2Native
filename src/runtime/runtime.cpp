@@ -24,6 +24,7 @@
 #include "inputs.h"
 #include "wheel.h"
 #include "fns.h"
+#include "game_hooks.h"
 #include "runtime.h"
 #include "drive_board.h"
 #include "jtag.h"
@@ -1043,13 +1044,8 @@ static bool in_attract() {
 constexpr uint32_t SR2_SELECT_STEP = 0x22435C, SR2_SELECT_MODE = 0x22432C, SR2_SELECT_COURSE = 0x224328,
                    SR2_SELECT_CAR = 0x224324, SR2_SELECT_GEARS = 0x224334;
 
-// SELECT COURSE's choice becomes the race's course id through the table at
-// 0xF1F20 (the race set-up, 0x46AAC: game structure +0x1C), in RAM with the
-// rest of the program: 3 DESERT, 2 MOUNTAIN, 4 MONACO, 5 SWEDISH. The ROM has
-// two more course ids no select reaches: 0 DESERT_OLD and 1 FOREST, the
-// unused fifth stage (docs/game_ram.md). DEBUG's FOREST (course 4) points
-// the first choice at 1 for that race, and sets it back once it is on
-constexpr uint32_t SR2_COURSE_IDS = 0xF1F20, SR2_COURSE_FOREST = 1, SR2_COURSE_DESERT = 3;
+// DEBUG's FOREST (course 4): SELECT COURSE's fifth card (game_hooks.cpp),
+// there when FOREST is on
 constexpr int DEBUG_FOREST = 4;
 
 // DEBUG (menu): from SELECT GAME on to a practice race of the course, car and
@@ -1059,13 +1055,12 @@ constexpr int DEBUG_FOREST = 4;
 static bool debug_jump_frame(uint64_t from) {
     stats_game_cheated();   // a race jumped to: no records
     int choice = g_debug_jump;
-    const bool forest = (choice & 0xF) == DEBUG_FOREST;
-    uint32_t course = forest ? 0 : uint32_t(choice & 0xF) & 3, car = uint32_t(choice >> 4 & 0xF) & 7, gears = uint32_t(choice >> 8 & 1);
+    const bool forest = (choice & 0xF) == DEBUG_FOREST && sr2_cards() > DEBUG_FOREST;
+    uint32_t course = forest ? DEBUG_FOREST : uint32_t(choice & 0xF) & 3, car = uint32_t(choice >> 4 & 0xF) & 7,
+             gears = uint32_t(choice >> 8 & 1);
     Inputs& p = g_inputs;
     int32_t step = int32_t(rd32(SR2_SELECT_STEP));
-    if (forest && step < 17) wr32(SR2_COURSE_IDS, SR2_COURSE_FOREST);   // the first choice is FOREST for this race
     auto finish = [&](const char* why) {
-        if (forest) wr32(SR2_COURSE_IDS, SR2_COURSE_DESERT);   // and DESERT again for the next
         printf("[debug] %s: step %d after %llu frames (course %u%s car %u gears %u)\n", why, step,
                (unsigned long long)(g_frame - from), course, forest ? " = FOREST" : "", car, gears);
         p.accel = 0;

@@ -430,7 +430,7 @@ struct DebugPick {
     int index;
     const wchar_t* name;
 };
-// (4: FOREST, the unused fifth stage the ROM still has; runtime.cpp points the first course at it)
+// (4: FOREST, the unused fifth stage the ROM still has: SELECT COURSE's fifth card, game_hooks.cpp)
 const DebugPick DEBUG_COURSES[] = {{0, L"DESERT"}, {1, L"MOUNTAIN"}, {3, L"SNOWY"}, {2, L"RIVIERA"}, {4, L"FOREST (UNUSED)"}};
 // In SELECT CAR's order, then the two hidden ones (its table at 0xF1F00 has eight)
 // DIFFICULTY in the menu's order, easiest first: the game's number for each
