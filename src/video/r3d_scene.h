@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -48,6 +49,7 @@ enum : uint32_t {
     R3D_ACTOR = 1 << 18,       // a model of the world turned its own way: the other cars, people (r3d_world.cpp)
     R3D_NO_SHADOW = 1 << 20,   // receives no sun shadows (the dust's particles)
     R3D_DUST = 1 << 23,        // DUST: ENHANCED: a particle drawn by r3d.frag's dust() (r3d_dust.cpp)
+    R3D_OWN_TEXTURE = 1 << 24, // replace is a picture of the port's own (R3DSceneBuilder::own_texture), not the pack's
 };
 
 struct R3DViewport {
@@ -57,6 +59,11 @@ struct R3DViewport {
     uint32_t node = 0;                       // culling RAM address of the viewport node (debugging)
     uint32_t build_index = 0;                // its list in R3DSceneBuilder::instances()
     uint32_t frustum[12] = {};               // its words 0x08-0x13: projection and frustum planes (debugging)
+    // Its lens in the frame built before (x and y scale and offset, proj 0, 5,
+    // 8, 9), when the same viewport was there and its lens did not jump (a cut):
+    // R3DScene::proj_at
+    bool has_prev_lens = false;
+    float prev_lens[4] = {0, 0, 0, 0};
     float sun[3] = {0, 0, 0};
     float sun_intensity = 0, ambient = 0;
     float fog_color[3] = {0, 0, 0};
@@ -98,6 +105,15 @@ struct R3DScene {
     uint64_t frame = 0;
     size_t polygons = 0;
     size_t moving = 0;   // vertices whose position changed since the previous frame
+    // Viewport v's projection at t (smooth motion), its lens blended from the
+    // previous frame's to now's. A camera that zooms every frame (the
+    // attract's, standing far off with a long lens: 0.6 to 1.3% a frame) was
+    // drawn with now's lens all the frame long, the models in between: each
+    // frame began with the previous one's places through the new lens,
+    // everything jumping 2 to 3 px towards the middle (6 at the picture's
+    // sides) at every frame and sliding back through it, trembling and
+    // doubled. No previous lens: now's. SR2_PROJ_NOW=1: always now's (to compare)
+    void proj_at(size_t v, float t, float out[16]) const;
 };
 
 class R3DSceneBuilder {
@@ -129,6 +145,22 @@ public:
         texture_ram_ = ram;
     }
 
+    // Pictures of the port's own for models the port draws itself: copies of
+    // the game's in VROM the game never uses (from own_from on, set_own_models),
+    // so the same polygons can be told apart from the game's. Their polygons
+    // with texture word tex take the picture (the rows top to bottom of a
+    // PNG, TexturePack::own_picture). pictures: where they are loaded (kept
+    // apart from set_texture_pack, which may be off)
+    struct OwnPicture {
+        std::string file;
+        float top = 0, bottom = 1;
+        bool flip = false;
+        std::string over;   // optional PNG of the same size drawn over it (FOREST's PROTOTYPE badge)
+    };
+    void set_own_models(uint32_t own_from) { own_from_ = own_from; }
+    void set_own_pictures(TexturePack* pictures) { own_pictures_ = pictures; }
+    void own_texture(uint32_t tex, const OwnPicture& picture) { own_textures_[tex] = picture; }
+
 private:
     float stage_ms_[7] = {};   // nodes, track, screen, pack, pair, smooth, sync
     struct Mat {
@@ -154,6 +186,10 @@ private:
     uint32_t model_word(uint32_t addr) const;
     Mat matrix(uint32_t index) const;
     void link_previous(R3DScene& out);
+    // Each viewport's lens by its node, in the last frame built and the one
+    // before (R3DViewport::prev_lens)
+    std::unordered_map<uint32_t, std::array<float, 4>> lens_last_, lens_prev_;
+    uint64_t lens_last_frame_ = ~0ull, lens_prev_frame_ = ~0ull;
     // Sega Rally 2: smooth normals on the cars (r3d_scene.cpp)
     static void smooth_car_normals(R3DScene& out);
     // ... and their see-through layers moved with the bodywork between frames
@@ -230,6 +266,10 @@ private:
     TexturePack* pack_ = nullptr;
     R3DTextureRam* texture_ram_ = nullptr;
     std::unordered_map<uint32_t, uint32_t> frame_slots_;   // texture word -> slot, this frame
+    TexturePack* own_pictures_ = nullptr;
+    uint32_t own_from_ = 0x1000000;                           // VROM words of own models (none)
+    std::unordered_map<uint32_t, OwnPicture> own_textures_;   // texture word -> picture (own models only)
+    std::unordered_set<uint32_t> own_seen_;                   // own models' texture words already logged
 
     // Models drawn in each viewport, for the interpolation (copies of a model
     // are paired by place) and the world tracking

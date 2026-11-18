@@ -56,6 +56,11 @@ void Pack2D::init(const std::string& dir, uint32_t first_slot, uint32_t last_slo
             if (line[0] == '#') continue;
             if (sscanf(line, "rect %d %d %d %d", &e.cx, &e.cy, &e.cw, &e.ch) == 4) continue;
             if (sscanf(line, "match %d", &e.min_share) == 1) continue;
+            unsigned when_addr = 0, when_value = 0;
+            if (sscanf(line, "when %x %u", &when_addr, &when_value) == 2) {
+                e.when.push_back({when_addr, when_value});
+                continue;
+            }
             if (strncmp(line, "cover", 5) == 0) {   // texts: every cell of the box gives way, changed or empty
                 e.cover = true;
                 continue;
@@ -156,6 +161,9 @@ int Pack2D::apply(uint32_t* target, int stride, const uint32_t* raw, const uint3
     std::vector<Found> found_list;
     for (Entry& e : entries_) {
         if (e.failed) continue;
+        bool holds = true;
+        for (const auto& [addr, value] : e.when) holds = holds && ram_reader_ && ram_reader_(addr) == value;
+        if (!holds) continue;
         // On screen when enough of the reference cells are unchanged (half, or
         // its "match" line): first where it was captured, then wherever a few
         // of its cells appear

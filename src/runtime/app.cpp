@@ -30,6 +30,7 @@
 #include <windowsx.h>   // GET_X_LPARAM
 
 #include "disk_writer.h"
+#include "game_hooks.h"
 #include "gamepad.h"
 #include "inputs.h"
 #include "options.h"
@@ -481,7 +482,8 @@ int main(int argc, char** argv) {
     }
     renderer.set_max_aspect(g_opt.max_aspect);
     renderer.set_pixel_aspect(g_opt.pixel_aspect);
-    renderer.set_smooth_2d(!g_opt.pixel_2d);
+    // The 2D layers: xBR smoothing with the HD HUD, the ROM's own pixels without it
+    renderer.set_smooth_2d(!g_opt.pixel_2d && !g_opt.classic_hud);
     renderer.set_hud_edges(!g_opt.hud_centre);
     renderer.set_distance_haze(g_opt.haze);
     renderer.set_bloom(g_opt.bloom);
@@ -534,6 +536,7 @@ int main(int argc, char** argv) {
     // pictures) and the layers below the 3D image (192-247; the backdrops of
     // SkyPack use 248-255). More pictures than slots reuse the oldest (pack2d.h)
     Pack2D pack2d, pack2d_back;
+    Pack2D::set_ram_reader([](uint32_t addr) { return rd32(addr); });   // their "when" lines
     pack2d.init("textures/2d", 1, 191);
     pack2d_back.init("textures/2d_back", 192, SkyPack::FIRST_SLOT - 1);
     static_assert(SkyPack::LAST_SLOT == Pack2D::MAX_SLOTS - 1, "the backdrops take the last slots");
@@ -552,6 +555,17 @@ int main(int argc, char** argv) {
     if (!g_opt.replay.empty() && getenv("LW_2D_CAPTURE")) capture_2d = true;
     bool f12_was_down = false, f9_was_down = false;
     builder.set_vrom(g_vrom.data(), g_vrom.size());
+    // SELECT COURSE's FOREST card (game_hooks.cpp): a copy of DESERT's card in
+    // VROM no one uses, with the picture (the top two thirds) and the name
+    // band (the bottom third) of res/forest/card.png in place of DESERT's,
+    // texture words 04F00100 (256 x 128) and 02F80100 (256 x 64). Upside down
+    // in texture RAM, as the card shows them: the file is upright. The track is
+    // unfinished in the ROM: res/forest/prototype.png puts a PROTOTYPE badge
+    // over the picture (kept apart from the card art)
+    builder.set_own_models(SR2_OWN_VROM);
+    builder.set_own_pictures(&pack);
+    builder.own_texture(0x04F00100, {"res/forest/card.png", 0.0f, 2.0f / 3.0f, true, "res/forest/prototype.png"});
+    builder.own_texture(0x02F80100, {"res/forest/card.png", 2.0f / 3.0f, 1.0f, true, "res/forest/prototype.png"});
     // The 2D layers of one vblank as the renderer takes them (compose_2d below)
     struct Layers2D {
         uint64_t frame = ~0ull;   // the vblank
@@ -1136,7 +1150,7 @@ int main(int argc, char** argv) {
             if (jump && *jump && g_menu_open && !arcade_join && !g_arcade_entry && !g_boot_skip) {
                 int course = 0, car = 0, gears = 0;
                 sscanf(jump, "%d,%d,%d", &course, &car, &gears);
-                frontend.debug_choice = (course & 3) | (car & 7) << 4 | (gears & 1) << 8;
+                frontend.debug_choice = (course & 7) | (car & 7) << 4 | (gears & 1) << 8;   // (course 4: FOREST)
                 frontend.request(Frontend::Action::StartDebug);
                 jump = nullptr;
                 // (SR2_AUTOQUIT=S here too: QUIT TO MAIN MENU S seconds into the practice, then PLAY again)
@@ -1268,6 +1282,7 @@ int main(int argc, char** argv) {
                         g_opt.classic_hud = !s.hd_hud;
                         shown = ~0ull;   // compose the 2D layer again even while the game stands still
                     }
+                    renderer.set_smooth_2d(!g_opt.pixel_2d && !g_opt.classic_hud);
                     g_opt.classic_liveries = !s.hd_liveries;   // the scene builders pick it up with their next frame
                     if (!g_opt.arcade) {   // the race set-up: the game thread puts them in the operator settings
                         g_opt.difficulty = s.difficulty;
@@ -1563,7 +1578,14 @@ int main(int argc, char** argv) {
         // taken once the picture reaches the one built. Otherwise at once.
         // While interpolating the frames come from the preparation thread
         // (their lateness includes its work), otherwise straight from the game
-        bool interpolating = g_opt.interp && g_opt.replay.empty() && !g_opt.shot_frame;
+        // The attract is shown as the game draws it, whatever the setting: its
+        // cameras beside the road, their long lenses and the cars going past
+        // them close up were where smooth motion went wrong (the frames in
+        // between have nothing of the arcade's own to go by), and an arcade
+        // ORIGINAL start shows it first. The game itself follows the setting.
+        // SR2_ATTRACT_SMOOTH=1: smooth there too (to compare)
+        static const bool attract_smooth = getenv("SR2_ATTRACT_SMOOTH") && atoi(getenv("SR2_ATTRACT_SMOOTH")) == 1;
+        bool interpolating = g_opt.interp && g_opt.replay.empty() && !g_opt.shot_frame && (attract_smooth || !g_in_attract);
         if (interpolating != prep_on) {   // a frame it made earlier is not one to go back to
             prep_on = interpolating;
             std::lock_guard<std::mutex> lock(ready_mutex);

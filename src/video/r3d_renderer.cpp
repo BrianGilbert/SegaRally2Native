@@ -56,6 +56,7 @@ struct AtmosphereUniform {
     float gi[4];
     float mirror[4];
     float rt[4];
+    float dust_mv[4];
 };
 
 // The cars, stands and poles are a few units big, so the map covers little
@@ -517,8 +518,19 @@ VkPipeline R3DRenderer::make_pipeline(const PipelineDesc& d) {
     VkPipelineColorBlendAttachmentState cbas[3]{};
     VkPipelineColorBlendAttachmentState& cba = cbas[0];
     cba.colorWriteMask = 0xF;
-    // Motion vectors: written by the opaque pass only, translucent surfaces keep what is behind
-    cbas[1].colorWriteMask = d.depth_write ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT : 0;
+    // Motion vectors: written by the opaque pass; translucent surfaces keep what
+    // is behind, except the dust where it is dense (its own laid over it by its
+    // w, r3d.frag; 0 for the rest)
+    cbas[1].colorWriteMask = d.depth_write || d.blend ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT : 0;
+    if (d.blend && !d.depth_write) {
+        cbas[1].blendEnable = VK_TRUE;
+        cbas[1].srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        cbas[1].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        cbas[1].colorBlendOp = VK_BLEND_OP_ADD;
+        cbas[1].srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        cbas[1].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        cbas[1].alphaBlendOp = VK_BLEND_OP_ADD;
+    }
     if (d.blend) {
         cba.blendEnable = VK_TRUE;
         cba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
@@ -1121,10 +1133,12 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
         // Projection as used for the world viewport (widened when it fills the screen)
         bool full = w->x <= 0.5f && w->w >= SCREEN_W - 0.5f;
         float widen = full ? lay.view_w / SCREEN_W : 1.0f;
-        u.view[0] = w->proj[0] / widen;
-        u.view[1] = w->proj[5];
-        u.view[2] = w->proj[8] / widen;
-        u.view[3] = w->proj[9];
+        float wp[16];   // (its lens at this image's t, as the models are drawn: R3DScene::proj_at)
+        scene_->proj_at(size_t(w - scene_->viewports.data()), interp_, wp);
+        u.view[0] = wp[0] / widen;
+        u.view[1] = wp[5];
+        u.view[2] = wp[8] / widen;
+        u.view[3] = wp[9];
 
         // Distance haze. Horizon colour: a pale haze, tinted by the back
         // layer just above the horizon (where a level view direction meets
@@ -1244,8 +1258,17 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
                 u.rt[3] = dlaa_.ready() ? golden - std::floor(golden) : 0.0f;
             }
         }
-        u.soft[0] = soft_particles_ ? 1.0f : 0.0f;
+        // (2: what lies on the surface behind it, as the tyre tracks on the
+        // sand, is not softened, r3d.frag; SR2_SOFT_DECALS=1: it is, as before)
+        static const bool soft_decals = getenv("SR2_SOFT_DECALS") && atoi(getenv("SR2_SOFT_DECALS")) == 1;
+        u.soft[0] = soft_particles_ ? (soft_decals ? 1.0f : 2.0f) : 0.0f;
         u.soft[1] = 2.0f;
+        // The dust's own motion vectors where it is dense, from 30% to 50%
+        // opacity (r3d.frag). SR2_DUST_MV=0: the road's behind it, as before
+        static const bool dust_mv = !(getenv("SR2_DUST_MV") && atoi(getenv("SR2_DUST_MV")) == 0);
+        u.dust_mv[0] = dust_mv ? 1.0f : 0.0f;
+        u.dust_mv[1] = 0.3f;
+        u.dust_mv[2] = 0.5f;
         // Light in the game's fog, with the distance haze: strength, brighter
         // upwards, drifting banks
         if (w->fog_density > 0) {
@@ -1629,11 +1652,23 @@ void R3DRenderer::record_world(const Frame& f) {
                                  std::min(out_h - uint32_t(y0), uint32_t(v.h * sy + 0.5f))}};
                     vkCmdSetScissor(cmd, 0, 1, &sc);
                     ViewportPush pc{};
-                    memcpy(pc.proj, v.proj, 64);
+                    // Its lens at this image's t (R3DScene::proj_at), and at the
+                    // previous image's for the motion vectors: that one's x and y
+                    // scale and offset in the projection's places that are always
+                    // 0 (column 0 rows 1 and 2, column 1 rows 0 and 2), column 0
+                    // row 3 set to 1 to say so (r3d.vert; the shadow pass's matrix
+                    // has 0 there)
+                    size_t vi = size_t(&v - scene_->viewports.data());
+                    scene_->proj_at(vi, interp_, pc.proj);
+                    float pb[16];
+                    scene_->proj_at(vi, before, pb);
                     if (full) {
                         pc.proj[0] /= widen;
                         pc.proj[8] /= widen;
+                        pb[0] /= widen;
+                        pb[8] /= widen;
                     }
+                    pc.proj[1] = pb[0], pc.proj[2] = pb[5], pc.proj[4] = pb[8], pc.proj[6] = pb[9], pc.proj[3] = 1.0f;
                     pc.sun[0] = v.sun[0];
                     pc.sun[1] = v.sun[1];
                     pc.sun[2] = v.sun[2];
@@ -1752,8 +1787,12 @@ void R3DRenderer::record_world_depth(const Frame& f, const R3DViewport& w, bool 
     static const bool rt_split = getenv("LW_RTSPLIT") != nullptr;   // debugging aid: traced left, shadow map right
     static const float ao_rays = getenv("SR2_AO_ALL_RAYS") ? 20.5f : 20.0f;   // debugging aid: no probing rays first (ao.frag)
     const GiTune gi = gi_tune();
-    float ap[24] = {w.proj[0] / (full ? widen : 1.0f), w.proj[5], w.proj[8] / (full ? widen : 1.0f),
-                    w.proj[9], vx * sx + jitter_x, w.y * sy + jitter_y, vw * sx, w.h * sy,
+    float wp[16];   // (its lens at this image's t, as drawn: R3DScene::proj_at)
+    size_t wi = size_t(&w - scene_->viewports.data());
+    if (wi < scene_->viewports.size()) scene_->proj_at(wi, interp_, wp);
+    else memcpy(wp, w.proj, sizeof(wp));
+    float ap[24] = {wp[0] / (full ? widen : 1.0f), wp[5], wp[8] / (full ? widen : 1.0f),
+                    wp[9], vx * sx + jitter_x, w.y * sy + jitter_y, vw * sx, w.h * sy,
                     ao_radius, std::min(ao_strength_, 1.0f) * 0.85f * ao_gain, w.fog_density, w.fog_start,
                     alpha_seed, 0.12f * float(out_h), rt_ao_ ? ao_rays : 0.0f, rt_split ? 1.0f : 0.0f,
                     rt_gi_ ? gi.strength : 0.0f, rt_gi_ ? gi.rays : 0.0f, gi.reach, gi_turn(),

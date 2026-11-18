@@ -222,6 +222,21 @@ uint32_t TexturePack::dirty_slot(uint32_t tex, int w, int h, uint64_t hash) {
         }
     size_t best_same = size_t(best_score * 100);
     // (0.72: the rivals' number plates, another number on the same plate, came to 0.65 with ours)
+    // Another drawing, not dirt: one coat has one colour, so it lightens dark
+    // pixels (snow, dust) or darkens light ones (mud), never both. The race
+    // number plate with the player's position (a clean "2" came to 0.755 with
+    // the "1", which has the only HD plate) turns black strokes white and white
+    // ones black: it keeps the game's own picture (issue #125)
+    if (best) {
+        auto lum = [](const uint8_t* p) { return 0.3f * p[0] + 0.59f * p[1] + 0.11f * p[2]; };
+        size_t to_white = 0, to_black = 0;
+        for (size_t i = 0; i < n; i++) {
+            float was = lum(&best->rgba[i * 4]), now = lum(&rgba_[i * 4]);
+            to_white += was < 64 && now > 192;
+            to_black += was > 192 && now < 64;
+        }
+        if (to_white > n / 256 && to_black > n / 256) best = nullptr;
+    }
     if (best && best_score >= 0.72f && slots_.size() + 2 < max_slots_) {
         uint32_t base = load_slot(best->hash);
         if (base) {
@@ -266,6 +281,54 @@ uint32_t TexturePack::dirty_slot(uint32_t tex, int w, int h, uint64_t hash) {
     }
     if (result) dirty_[hash] = result;   // (a miss is looked at again: its original may turn up later)
     return result;
+}
+
+uint32_t TexturePack::own_picture(const std::string& file, float top, float bottom, bool flip,
+                                  const std::string& over) {
+    char part[48];
+    snprintf(part, sizeof(part), "|%.4f|%.4f|%d", top, bottom, int(flip));
+    std::string name = file + part + "|" + over;
+    uint64_t id = fnv1a_bytes(name.data(), name.size()) ^ 0x0A0A0A0A0A0A0A0Aull;   // (never a texture's hash)
+    auto loaded = slots_.find(id);
+    if (loaded != slots_.end()) return loaded->second;
+    if (own_missing_.count(id) || slots_.size() + 1 >= max_slots_) return 0;
+    RgbaImage full;
+    if (!png_load(file, full.w, full.h, full.rgba)) {
+        fprintf(stderr, "[textures] could not read %s\n", file.c_str());
+        own_missing_.insert(id);
+        return 0;
+    }
+    if (!over.empty()) {
+        RgbaImage top_image;
+        if (!png_load(over, top_image.w, top_image.h, top_image.rgba))
+            fprintf(stderr, "[textures] could not read %s\n", over.c_str());
+        else if (top_image.w != full.w || top_image.h != full.h)
+            fprintf(stderr, "[textures] %s is not the size of %s, left out\n", over.c_str(), file.c_str());
+        else
+            for (size_t i = 0; i < full.rgba.size(); i += 4) {
+                const uint8_t* o = &top_image.rgba[i];
+                for (int k = 0; k < 3; k++) full.rgba[i + k] = uint8_t((o[k] * o[3] + full.rgba[i + k] * (255 - o[3]) + 127) / 255);
+            }
+    }
+    int y0 = std::clamp(int(std::lround(top * full.h)), 0, full.h);
+    int y1 = std::clamp(int(std::lround(bottom * full.h)), y0, full.h);
+    if (y1 == y0) {
+        own_missing_.insert(id);
+        return 0;
+    }
+    RgbaImage img;
+    img.w = full.w;
+    img.h = y1 - y0;
+    img.rgba.resize(size_t(img.w) * img.h * 4);
+    size_t row = size_t(img.w) * 4;
+    for (int y = 0; y < img.h; y++)
+        memcpy(&img.rgba[size_t(y) * row], &full.rgba[size_t(flip ? y1 - 1 - y : y0 + y) * row], row);
+    uint32_t slot = uint32_t(slots_.size() + 1);
+    img.slot = slot;
+    slots_[id] = slot;
+    printf("[textures] %s, rows %d-%d: own picture %dx%d\n", file.c_str(), y0, y1, img.w, img.h);
+    pending_.push_back(std::move(img));
+    return slot;
 }
 
 std::vector<RgbaImage> TexturePack::take_new_images() {
