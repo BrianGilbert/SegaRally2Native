@@ -131,18 +131,18 @@ public:
         texture_ram_ = ram;
     }
 
-    // Pictures of the port's own for models the port draws itself. Such a
-    // model is one of the VROM's, drawn at its mirror: past the VROM's end
-    // (32 MB of VROM repeat over the 64 MB the nodes address), where the game
-    // never points, so the same polygons can be told apart from the game's.
-    // Its polygons with texture word tex take the picture (the rows top to
-    // bottom of a PNG, TexturePack::own_picture). pictures: where they are
-    // loaded (kept apart from set_texture_pack, which may be off)
+    // Pictures of the port's own for models the port draws itself: copies of
+    // the game's in VROM the game never uses (from own_from on, set_own_models),
+    // so the same polygons can be told apart from the game's. Their polygons
+    // with texture word tex take the picture (the rows top to bottom of a
+    // PNG, TexturePack::own_picture). pictures: where they are loaded (kept
+    // apart from set_texture_pack, which may be off)
     struct OwnPicture {
         std::string file;
         float top = 0, bottom = 1;
         bool flip = false;
     };
+    void set_own_models(uint32_t own_from) { own_from_ = own_from; }
     void set_own_pictures(TexturePack* pictures) { own_pictures_ = pictures; }
     void own_texture(uint32_t tex, const OwnPicture& picture) { own_textures_[tex] = picture; }
 
@@ -248,6 +248,7 @@ private:
     R3DTextureRam* texture_ram_ = nullptr;
     std::unordered_map<uint32_t, uint32_t> frame_slots_;   // texture word -> slot, this frame
     TexturePack* own_pictures_ = nullptr;
+    uint32_t own_from_ = 0x1000000;                           // VROM words of own models (none)
     std::unordered_map<uint32_t, OwnPicture> own_textures_;   // texture word -> picture (own models only)
     std::unordered_set<uint32_t> own_seen_;                   // own models' texture words already logged
 

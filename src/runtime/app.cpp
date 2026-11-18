@@ -30,6 +30,7 @@
 #include <windowsx.h>   // GET_X_LPARAM
 
 #include "disk_writer.h"
+#include "game_hooks.h"
 #include "gamepad.h"
 #include "inputs.h"
 #include "options.h"
@@ -551,11 +552,12 @@ int main(int argc, char** argv) {
     if (!g_opt.replay.empty() && getenv("LW_2D_CAPTURE")) capture_2d = true;
     bool f12_was_down = false, f9_was_down = false;
     builder.set_vrom(g_vrom.data(), g_vrom.size());
-    // SELECT COURSE's FOREST card (game_hooks.cpp): DESERT's card drawn at the
-    // VROM's mirror, with the picture (the top two thirds) and the name band
-    // (the bottom third) of res/forest/card.png in place of DESERT's, texture
-    // words 04F00100 (256 x 128) and 02F80100 (256 x 64). Upside down in
-    // texture RAM, as the card shows them: the file is upright
+    // SELECT COURSE's FOREST card (game_hooks.cpp): a copy of DESERT's card in
+    // VROM no one uses, with the picture (the top two thirds) and the name
+    // band (the bottom third) of res/forest/card.png in place of DESERT's,
+    // texture words 04F00100 (256 x 128) and 02F80100 (256 x 64). Upside down
+    // in texture RAM, as the card shows them: the file is upright
+    builder.set_own_models(SR2_OWN_VROM);
     builder.set_own_pictures(&pack);
     builder.own_texture(0x04F00100, {"res/forest/card.png", 0.0f, 2.0f / 3.0f, true});
     builder.own_texture(0x02F80100, {"res/forest/card.png", 2.0f / 3.0f, 1.0f, true});

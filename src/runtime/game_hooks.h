@@ -9,7 +9,10 @@
 int sr2_cards();   // 4 as the arcade, 5 with FOREST
 double sr2_card_radius(double angle, double radius);                  // how far out a card is drawn
 uint32_t sr2_card_model(uint32_t table, uint32_t offset, bool lit);   // card offset / 4 drawn
-uint32_t sr2_model_address(uint32_t ea, uint32_t model);              // its VROM address (FOREST's: the mirror)
+uint32_t sr2_model_address(uint32_t ea, uint32_t model);              // its VROM address (FOREST's: a copy)
+// VROM words from here on are the port's own models (copies of the game's, the
+// FOREST card's), drawn with own pictures (R3DSceneBuilder::set_own_models)
+constexpr uint32_t SR2_OWN_VROM = 0xFF0000;
 uint32_t sr2_card_flag_load(uint32_t ea);                             // a card's flag (0x47D424 + 4 x card)
 void sr2_card_flag_store(uint32_t ea, uint32_t v);
 void sr2_card_flag_store_all(uint32_t ea, uint32_t v);                // the loops that set them all (four)

@@ -5,11 +5,15 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <unordered_map>
+#include <vector>
 
 #include "options.h"
 #include "ppc_rt.h"
 
 extern Options g_opt;   // app.cpp
+extern std::vector<uint8_t> g_vrom;   // runtime.cpp
 
 // ---- SELECT COURSE with a fifth card, FOREST --------------------------------
 // The ROM has a fifth stage, FOREST (course id 1, docs/game_ram.md), that no
@@ -50,12 +54,51 @@ double sr2_card_radius(double angle, double radius) {
 // FOREST's card: the DESERT card's models (708, lit 709, the first of each
 // table) with its own pictures. The model number carries a mark (bit 28: the
 // model table's offset, number << 4, leaves it out), and the VROM address
-// drawn (sr2_model_address) is then the model's mirror: VROM's 32 MB repeat
-// over the 64 MB a node addresses, so the renderer draws the same polygons
-// and tells them apart from DESERT's (R3DSceneBuilder::own_texture, app.cpp:
-// the picture and name band from res/forest/card.png)
-constexpr uint32_t OWN_MODEL = 0x10000000;   // on the model number
-constexpr uint32_t VROM_MIRROR = 0x800000;   // on the VROM word address: 32 MB on
+// drawn (sr2_model_address) is then a copy of the model in VROM nobody uses
+// (from SR2_OWN_VROM: the 64 MB end in zeros from 0xFA6F40), so the renderer
+// tells it apart from DESERT's (R3DSceneBuilder::own_texture, app.cpp: the
+// picture and name band from res/forest/card.png)
+static constexpr uint32_t OWN_MODEL = 0x10000000;   // on the model number
+
+// A model's length in VROM words: its polygons up to the one marked last
+// (bit 2 of word 1) or a zero word 6 (real3d_spec.md, as R3DSceneBuilder::model)
+static size_t model_words(const uint32_t* v, size_t from, size_t total) {
+    size_t p = from;
+    for (int guard = 0; guard < 65536 && p + 7 <= total; guard++) {
+        const uint32_t* h = v + p;
+        if (h[6] == 0) break;
+        int n = (h[0] & 0x40) ? 4 : 3, shared = 0;
+        for (int i = 0; i < 4; i++) shared += (h[0] >> i) & 1;
+        p += 7 + 4 * size_t(n > shared ? n - shared : 0);
+        if (h[1] & 4) break;
+    }
+    return p - from;
+}
+
+// The copy of the model at addr in the free VROM (made once), addr itself
+// when there is no room
+static uint32_t own_copy(uint32_t addr) {
+    static std::unordered_map<uint32_t, uint32_t> copies;
+    static uint32_t next = SR2_OWN_VROM;
+    auto it = copies.find(addr);
+    if (it != copies.end()) return it->second;
+    uint32_t copy = addr;
+    size_t total = g_vrom.size() / 4;
+    uint32_t* v = reinterpret_cast<uint32_t*>(g_vrom.data());
+    size_t n = addr < total ? model_words(v, addr, total) : 0;
+    bool room = n && next + n <= total;
+    for (size_t i = 0; room && i < n; i++) room = v[next + i] == 0;
+    if (room) {
+        memcpy(v + next, v + addr, n * 4);
+        copy = next;
+        next += uint32_t(n);
+        printf("[forest] card model %06x copied to %06x (%zu words)\n", addr, copy, n);
+    } else {
+        printf("[forest] no room in VROM at %06x for the card model %06x: DESERT's pictures\n", next, addr);
+    }
+    copies[addr] = copy;
+    return copy;
+}
 
 uint32_t sr2_card_model(uint32_t table, uint32_t offset, bool) {
     if (offset >> 2 >= uint32_t(FOREST_CARD)) return rd32(table) | OWN_MODEL;
@@ -64,7 +107,7 @@ uint32_t sr2_card_model(uint32_t table, uint32_t offset, bool) {
 
 uint32_t sr2_model_address(uint32_t ea, uint32_t model) {
     uint32_t addr = rd32(ea);
-    return model & OWN_MODEL ? addr | VROM_MIRROR : addr;
+    return model & OWN_MODEL ? own_copy(addr) : addr;
 }
 
 uint32_t sr2_card_flag_load(uint32_t ea) {

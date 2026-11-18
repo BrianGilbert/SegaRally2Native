@@ -1338,8 +1338,8 @@ void R3DSceneBuilder::model(uint32_t addr, const Mat& m, const Attribs& a) {
     uint64_t instance = uint64_t(instance_key(addr)) << 32;
     uint32_t drawn = 0;
     const uint32_t start_addr = addr;
-    // One the port draws itself, at the VROM's mirror (own_texture)
-    const bool own = own_pictures_ && vrom_mask_ && (addr & 0xFFFFFF) >= 0x100000 && (addr & 0xFFFFFF) > vrom_mask_;
+    // One the port draws itself (own_texture)
+    const bool own = own_pictures_ && (addr & 0xFFFFFF) >= std::max<uint32_t>(own_from_, 0x100000);
     uint32_t opaque_from = uint32_t(opaque_.size()), trans_from = uint32_t(trans_.size()), back_from = uint32_t(backs_.size());
 
     for (int guard = 0; guard < 65536; guard++) {
