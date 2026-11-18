@@ -222,6 +222,21 @@ uint32_t TexturePack::dirty_slot(uint32_t tex, int w, int h, uint64_t hash) {
         }
     size_t best_same = size_t(best_score * 100);
     // (0.72: the rivals' number plates, another number on the same plate, came to 0.65 with ours)
+    // Another drawing, not dirt: one coat has one colour, so it lightens dark
+    // pixels (snow, dust) or darkens light ones (mud), never both. The race
+    // number plate with the player's position (a "2" came to 0.72 with the
+    // "1", which has the only HD plate) turns black strokes white and white
+    // ones black: it keeps the game's own picture (issue #125)
+    if (best) {
+        auto lum = [](const uint8_t* p) { return 0.3f * p[0] + 0.59f * p[1] + 0.11f * p[2]; };
+        size_t to_white = 0, to_black = 0;
+        for (size_t i = 0; i < n; i++) {
+            float was = lum(&best->rgba[i * 4]), now = lum(&rgba_[i * 4]);
+            to_white += was < 64 && now > 192;
+            to_black += was > 192 && now < 64;
+        }
+        if (to_white > n / 256 && to_black > n / 256) best = nullptr;
+    }
     if (best && best_score >= 0.72f && slots_.size() + 2 < max_slots_) {
         uint32_t base = load_slot(best->hash);
         if (base) {
