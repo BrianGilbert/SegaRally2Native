@@ -13,6 +13,11 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[28] 18 November 2026
+- HD HUD: there is now room in memory for all the HD pictures, so in long sessions (a championship, for example) they should no longer go back to the original low-res ones.
+- OPTIONS > WHEEL: pressing Enter while the "BUTTON n - WHEEL" message is on screen should no longer leave the window stuck.
+- With HD HUD off, the original HUD should now show the arcade's own sharp pixels, with no smoothing. The HD HUD does not change.
+
 [27] 18 November 2026
 - Saves now happen in the background, which may help with short hitches when the game runs from an external drive.
 - SELECT CAR: each keyboard press now moves one car, so the middle cars are no longer skipped.
