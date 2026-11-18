@@ -1135,7 +1135,7 @@ int main(int argc, char** argv) {
             if (jump && *jump && g_menu_open && !arcade_join && !g_arcade_entry && !g_boot_skip) {
                 int course = 0, car = 0, gears = 0;
                 sscanf(jump, "%d,%d,%d", &course, &car, &gears);
-                frontend.debug_choice = (course & 3) | (car & 7) << 4 | (gears & 1) << 8;
+                frontend.debug_choice = (course & 7) | (car & 7) << 4 | (gears & 1) << 8;   // (course 4: FOREST)
                 frontend.request(Frontend::Action::StartDebug);
                 jump = nullptr;
                 // (SR2_AUTOQUIT=S here too: QUIT TO MAIN MENU S seconds into the practice, then PLAY again)

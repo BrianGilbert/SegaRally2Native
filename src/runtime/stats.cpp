@@ -66,7 +66,7 @@ int course_of(int round) {
     case 2: return 1;   // MOUNTAIN
     case 5: return 2;   // SWEDISH (snowy)
     case 4: return 3;   // MONACO (Riviera)
-    default: return -1;   // the two courses of the first Sega Rally, not raced
+    default: return -1;   // 0 DESERT_OLD, 1 FOREST: in the ROM, not on the course select (no records)
     }
 }
 
