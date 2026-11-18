@@ -50,6 +50,10 @@ _set([0x5CD8, 0x5D24, 0x5DAC, 0x5DF8, 0x5EBC, 0x5F08], [f"c.f[12].d = {TURN};"])
 
 # Drawing (0x5FF4): card i at 2 pi i x 0.25 (lfs f13, 0.25: 0xE9814) -> 1 / cards
 _set([0x60C0], [f"c.f[13].d = double(1.0f / float({N}));"])
+# and how far out from the middle (an ellipse, 1.4 / sqrt(cos^2 + 2.25 sin^2)):
+# fdivs f3, f27, f3, f29 the card's angle. Five cards: the two at the back
+# drawn further apart, the front ones where the four's side cards were
+_set([0x61B4], ["c.f[3].d = sr2_card_radius(c.f[29].d, rs(c.f[27].d / c.f[3].d));"])
 # and its model: lwzx r3, r9, r29 (lit, 0xE9790) / lwzx r3, r9, r30 (0xE9780)
 _set([0x6210], ["c.r[3] = sr2_card_model(c.r[29], c.r[9], true);"])
 _set([0x6224], ["c.r[3] = sr2_card_model(c.r[30], c.r[9], false);"])

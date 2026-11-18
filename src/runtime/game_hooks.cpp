@@ -2,6 +2,10 @@
 // (tools/game_hooks.py, game_hooks.h).
 #include "game_hooks.h"
 
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+
 #include "options.h"
 #include "ppc_rt.h"
 
@@ -24,6 +28,23 @@ int card_of(uint32_t ea) { return int(int32_t(ea - CARD_FLAGS) >> 2); }
 
 int sr2_cards() {
     return g_opt.forest && !g_opt.arcade ? 5 : 4;
+}
+
+// The four cards were a quarter turn apart: the side ones at 90 degrees, the
+// back one alone. Five at 72 degrees on the same ellipse put the two at the
+// back (144) against each other, and the front pair out further than the side
+// ones were. Five: the radius times 1 + a (1 - cos) / 2 + b sin^2, 1 at the
+// front; a 0.358, b -0.214 put the front pair (72) 7% in and the back pair
+// (144) 25% out. SR2_CARD_SPREAD=a,b tries others without a build
+double sr2_card_radius(double angle, double radius) {
+    if (sr2_cards() == 4) return radius;
+    static const double* ab = [] {
+        static double v[2] = {0.358, -0.214};
+        if (const char* e = getenv("SR2_CARD_SPREAD")) sscanf(e, "%lf,%lf", &v[0], &v[1]);
+        return v;
+    }();
+    double c = std::cos(angle), u = (1 - c) / 2, s2 = 1 - c * c;
+    return double(float(radius * (1 + ab[0] * u + ab[1] * s2)));
 }
 
 // FOREST's card: for now the DESERT card's models (708, lit 709), the first
