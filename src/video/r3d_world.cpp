@@ -539,6 +539,76 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
     }
 }
 
+// Sega Rally 2: the marks the game lays on the ground as the cars go (the
+// tyre tracks in the desert's sand) are polygons it writes into polygon RAM
+// every frame, at the height it keeps the cars above the road: 14 to 24 cm
+// over the sand behind a car that settle_player_car sets down by 31, left
+// floating (seen in the main build as tracks hanging above the road). Each
+// corner of a see-through model of polygon RAM lying flat (no polygon steeper
+// than 25 degrees) whose corners are all within 40 cm over the scenery below
+// them is set 3 cm over it, as the cars' patches are. Not the patches
+// themselves (settle_cars), nor anything of a car, a person or the dust (no
+// model that moves its own way: turned the scenery's way only), nor anything
+// standing. SR2_MARKS_AS_IS=1: as the game places them
+static void settle_ground_marks(const std::vector<R3DInstance>& list, const float* axes, R3DScene& out, const R3DViewport& v) {
+    static const bool off = getenv("SR2_MARKS_AS_IS") && atoi(getenv("SR2_MARKS_AS_IS")) == 1;
+    if (off) return;
+    const float *ax = axes, *up = axes + 3, *az = axes + 6;
+    auto dot = [](const float* a, const float* b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+    const float steep = std::cos(25.0f * 3.14159265f / 180.0f);
+    struct Mark {
+        size_t n, first, end;   // the instance, its corners among the queries
+    };
+    std::vector<Mark> marks;
+    std::vector<GroundQuery> queries;
+    for (size_t n = 0; n < list.size(); n++) {
+        const R3DInstance& in = list[n];
+        if (in.model >= 0x100000u || !r3d_same_axes(in.axes, axes)) continue;   // (polygon RAM, the scenery's way)
+        if (in.opaque[1] > in.opaque[0] || in.trans[1] <= in.trans[0] || is_patch(in, out, v)) continue;
+        bool flat = true;
+        for (uint32_t i = in.trans[0]; flat && i + 2 < in.trans[1]; i += 3) {
+            const R3DVertex* t = &out.vertices[v.trans_first + i];
+            if (t[0].flags & (R3D_ACTOR | R3D_CAR | R3D_DUST)) flat = false;
+            float a[3], b[3], c[3];
+            for (int k = 0; k < 3; k++) a[k] = t[1].pos[k] - t[0].pos[k], b[k] = t[2].pos[k] - t[0].pos[k];
+            c[0] = a[1] * b[2] - a[2] * b[1], c[1] = a[2] * b[0] - a[0] * b[2], c[2] = a[0] * b[1] - a[1] * b[0];
+            float l = std::sqrt(dot(c, c));
+            if (l > 1e-9f && std::fabs(dot(c, up)) < steep * l) flat = false;
+        }
+        if (!flat) continue;
+        Mark m{n, queries.size(), 0};
+        for (uint32_t i = in.trans[0]; i < in.trans[1]; i++) {
+            const float* q = out.vertices[v.trans_first + i].pos;
+            queries.push_back({dot(q, ax), dot(q, up), dot(q, az)});
+        }
+        m.end = queries.size();
+        marks.push_back(m);
+    }
+    if (marks.empty()) return;
+    ground_under(list, axes, out, v, queries);
+    for (const Mark& m : marks) {
+        bool near = true;
+        for (size_t q = m.first; near && q < m.end; q++) {
+            float gap = queries[q].h - queries[q].ground;
+            near = queries[q].ground > -1e29f && gap > -0.05f && gap < 0.40f;
+        }
+        if (!near) continue;
+        const R3DInstance& in = list[m.n];
+        static const bool log = getenv("SR2_MARKS_LOG") != nullptr;   // (debugging aid: each mark set down, stdout)
+        if (log) {
+            float lo = 1e30f, hi = -1e30f;
+            for (size_t q = m.first; q < m.end; q++) lo = std::min(lo, queries[q].h - queries[q].ground), hi = std::max(hi, queries[q].h - queries[q].ground);
+            printf("[mark] frame %llu model %06X corners %zu over the ground %.3f to %.3f\n", (unsigned long long)out.frame, in.model, m.end - m.first, lo, hi);
+        }
+        for (uint32_t i = in.trans[0]; i < in.trans[1]; i++) {
+            float gap = queries[m.first + (i - in.trans[0])].h - queries[m.first + (i - in.trans[0])].ground;
+            if (gap <= 0.03f) continue;
+            R3DVertex& x = out.vertices[v.trans_first + i];
+            for (int k = 0; k < 3; k++) x.pos[k] -= up[k] * (gap - 0.03f), x.prev[k] -= up[k] * (gap - 0.03f);
+        }
+    }
+}
+
 // Sega Rally 2: some of the models that stand on the ground hang a little
 // above it in the game's data (the flagman at the start line, ~12 cm). The
 // game's dark patch under them hid it; the traced sun shadows showed a lit
@@ -869,6 +939,7 @@ void R3DWorldTracker::track(const std::vector<std::vector<R3DInstance>>& viewpor
         for (uint32_t i = in.trans[0]; i < in.trans[1]; i++) out.vertices[v.trans_first + i].flags |= R3D_ACTOR;
     }
     settle_actors(viewport_instances[best], axes, out, v);
+    settle_ground_marks(viewport_instances[best], axes, out, v);
     settle_scenery(viewport_instances[best], axes, out, v);
     // SR2_TINT (debugging aid): the models' polygons coloured by kind, to tell
     // bodywork from glass: magenta specular untextured, green luminous

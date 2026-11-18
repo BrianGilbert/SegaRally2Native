@@ -57,6 +57,11 @@ struct R3DViewport {
     uint32_t node = 0;                       // culling RAM address of the viewport node (debugging)
     uint32_t build_index = 0;                // its list in R3DSceneBuilder::instances()
     uint32_t frustum[12] = {};               // its words 0x08-0x13: projection and frustum planes (debugging)
+    // Its lens in the frame built before (x and y scale and offset, proj 0, 5,
+    // 8, 9), when the same viewport was there and its lens did not jump (a cut):
+    // R3DScene::proj_at
+    bool has_prev_lens = false;
+    float prev_lens[4] = {0, 0, 0, 0};
     float sun[3] = {0, 0, 0};
     float sun_intensity = 0, ambient = 0;
     float fog_color[3] = {0, 0, 0};
@@ -98,6 +103,15 @@ struct R3DScene {
     uint64_t frame = 0;
     size_t polygons = 0;
     size_t moving = 0;   // vertices whose position changed since the previous frame
+    // Viewport v's projection at t (smooth motion), its lens blended from the
+    // previous frame's to now's. A camera that zooms every frame (the
+    // attract's, standing far off with a long lens: 0.6 to 1.3% a frame) was
+    // drawn with now's lens all the frame long, the models in between: each
+    // frame began with the previous one's places through the new lens,
+    // everything jumping 2 to 3 px towards the middle (6 at the picture's
+    // sides) at every frame and sliding back through it, trembling and
+    // doubled. No previous lens: now's. SR2_PROJ_NOW=1: always now's (to compare)
+    void proj_at(size_t v, float t, float out[16]) const;
 };
 
 class R3DSceneBuilder {
@@ -154,6 +168,10 @@ private:
     uint32_t model_word(uint32_t addr) const;
     Mat matrix(uint32_t index) const;
     void link_previous(R3DScene& out);
+    // Each viewport's lens by its node, in the last frame built and the one
+    // before (R3DViewport::prev_lens)
+    std::unordered_map<uint32_t, std::array<float, 4>> lens_last_, lens_prev_;
+    uint64_t lens_last_frame_ = ~0ull, lens_prev_frame_ = ~0ull;
     // Sega Rally 2: smooth normals on the cars (r3d_scene.cpp)
     static void smooth_car_normals(R3DScene& out);
     // ... and their see-through layers moved with the bodywork between frames

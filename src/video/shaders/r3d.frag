@@ -38,7 +38,8 @@ layout(set = 0, binding = 5) uniform sampler2D scene_depth;    // the opaque wor
 #include "atmosphere.glsl"
 
 layout(location = 0) out vec4 out_color;
-layout(location = 1) out vec2 out_motion;   // DLAA only: pixels from here to the previous image
+layout(location = 1) out vec4 out_motion;   // DLAA only: pixels from here to the previous image; w how much
+                                            // of it a see-through surface lays over what is behind (blended)
 layout(location = 2) out vec4 out_glow;     // bloom: the bright part of luminous world surfaces
 
 #include "r3d_texture.glsl"
@@ -444,7 +445,7 @@ void main() {
     // derivatives give the viewport size without passing it in
     vec2 ndc = clip_now.xy / clip_now.w;
     vec2 px_per_ndc = 1.0 / vec2(dFdx(ndc.x), dFdy(ndc.y));
-    out_motion = (clip_before.xy / clip_before.w - ndc) * px_per_ndc;
+    out_motion = vec4((clip_before.xy / clip_before.w - ndc) * px_per_ndc, 0.0, 0.0);
     gl_SampleMask[0] = -1;   // a statically written mask must be set on every path
     vec4 col = color;
     if ((flags & DUST) != 0u) {   // only in the translucent pass
@@ -476,6 +477,11 @@ void main() {
         if (atm.haze.a > 0.0) c.rgb = distance_haze(c.rgb, view_pos, fog);
         out_color = c;
         out_glow = vec4(0.0, 0.0, 0.0, c.a);
+        // Where the cloud is dense its own motion, not that of the road behind
+        // it: DLAA/DLSS looked for the history of the road there, a frame's
+        // travel up the screen, and found the car's bumper (a ghost of it in
+        // the dust under the car). Blended over what is behind as the cloud is
+        out_motion.w = atm.dust_mv.x > 0.0 ? smoothstep(atm.dust_mv.y, atm.dust_mv.z, c.a) : 0.0;
         return;
     }
     if ((flags & TRANSLATOR) != 0u) col.rgb *= 16.0;
@@ -732,9 +738,25 @@ void main() {
     // Textured ones only: the game's untextured black patch under each car (its
     // shadow) lies 3 cm over the road once the car is set down on it
     // (settle_player_car), and faded over 2 m it was gone
+    // Not what lies on the surface behind it (atm.soft.x 2): the tyre tracks
+    // the game lays on the sand, a few centimetres over it, were faded to
+    // nothing. Told by its distance from the eye changing across the screen
+    // as that of the surface behind does (a sprite standing in the ground, a
+    // cloud, change otherwise)
     if (vp.quality.x < 0.0 && atm.soft.x > 0.0 && (flags & (WORLD | TEXTURED)) == (WORLD | TEXTURED)) {
-        float d = texelFetch(scene_depth, ivec2(gl_FragCoord.xy), 0).r;
-        if (d > 0.0) c.a *= clamp((view_pos.z + 1e-3 / d) / atm.soft.y, 0.0, 1.0);
+        ivec2 at = ivec2(gl_FragCoord.xy), last = textureSize(scene_depth, 0) - 1;
+        float d = texelFetch(scene_depth, at, 0).r;
+        bool lying = false;
+        if (atm.soft.x > 1.5 && d > 0.0 && at.x < last.x && at.y < last.y) {
+            float dx = texelFetch(scene_depth, at + ivec2(1, 0), 0).r, dy = texelFetch(scene_depth, at + ivec2(0, 1), 0).r;
+            if (dx > 0.0 && dy > 0.0) {
+                vec2 behind = vec2(1e-3 / dx - 1e-3 / d, 1e-3 / dy - 1e-3 / d);   // the surface behind: its distance's change a pixel on
+                vec2 own = vec2(dFdx(-view_pos.z), dFdy(-view_pos.z));
+                float size = abs(behind.x) + abs(behind.y) + abs(own.x) + abs(own.y);
+                lying = size > 1e-6 && abs(behind.x - own.x) + abs(behind.y - own.y) < 0.15 * size;
+            }
+        }
+        if (d > 0.0 && !lying) c.a *= clamp((view_pos.z + 1e-3 / d) / atm.soft.y, 0.0, 1.0);
     }
     out_color = c;
     // Bloom source: fire, explosions and lights are drawn unlit (luminous);
