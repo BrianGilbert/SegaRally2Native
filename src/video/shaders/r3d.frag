@@ -38,7 +38,8 @@ layout(set = 0, binding = 5) uniform sampler2D scene_depth;    // the opaque wor
 #include "atmosphere.glsl"
 
 layout(location = 0) out vec4 out_color;
-layout(location = 1) out vec2 out_motion;   // DLAA only: pixels from here to the previous image
+layout(location = 1) out vec4 out_motion;   // DLAA only: pixels from here to the previous image; w how much
+                                            // of it a see-through surface lays over what is behind (blended)
 layout(location = 2) out vec4 out_glow;     // bloom: the bright part of luminous world surfaces
 
 #include "r3d_texture.glsl"
@@ -444,7 +445,7 @@ void main() {
     // derivatives give the viewport size without passing it in
     vec2 ndc = clip_now.xy / clip_now.w;
     vec2 px_per_ndc = 1.0 / vec2(dFdx(ndc.x), dFdy(ndc.y));
-    out_motion = (clip_before.xy / clip_before.w - ndc) * px_per_ndc;
+    out_motion = vec4((clip_before.xy / clip_before.w - ndc) * px_per_ndc, 0.0, 0.0);
     gl_SampleMask[0] = -1;   // a statically written mask must be set on every path
     vec4 col = color;
     if ((flags & DUST) != 0u) {   // only in the translucent pass
@@ -476,6 +477,11 @@ void main() {
         if (atm.haze.a > 0.0) c.rgb = distance_haze(c.rgb, view_pos, fog);
         out_color = c;
         out_glow = vec4(0.0, 0.0, 0.0, c.a);
+        // Where the cloud is dense its own motion, not that of the road behind
+        // it: DLAA/DLSS looked for the history of the road there, a frame's
+        // travel up the screen, and found the car's bumper (a ghost of it in
+        // the dust under the car). Blended over what is behind as the cloud is
+        out_motion.w = atm.dust_mv.x > 0.0 ? smoothstep(atm.dust_mv.y, atm.dust_mv.z, c.a) : 0.0;
         return;
     }
     if ((flags & TRANSLATOR) != 0u) col.rgb *= 16.0;

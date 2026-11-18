@@ -31,6 +31,8 @@ layout(set = ATMOSPHERE_SET, binding = ATMOSPHERE_BINDING) uniform Atmosphere {
     vec4 mirror;     // w: 1 = ray traced reflections on the cars (r3d.frag)
     vec4 rt;         // ray traced sun shadows: x 1 = on (2: left half only), y size of the sun (tangent of its radius),
                      // z rays per point, w noise seed (changes every image with DLAA)
+    vec4 dust_mv;    // DLAA/DLSS: x 1 = the dust writes its own motion vectors where it is dense (r3d.frag),
+                     // fully from opacity z, none below y
 } atm;
 
 // Spotlight lobe across the view (spec 7.1) for a view direction given as

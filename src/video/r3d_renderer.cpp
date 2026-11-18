@@ -56,6 +56,7 @@ struct AtmosphereUniform {
     float gi[4];
     float mirror[4];
     float rt[4];
+    float dust_mv[4];
 };
 
 // The cars, stands and poles are a few units big, so the map covers little
@@ -517,8 +518,19 @@ VkPipeline R3DRenderer::make_pipeline(const PipelineDesc& d) {
     VkPipelineColorBlendAttachmentState cbas[3]{};
     VkPipelineColorBlendAttachmentState& cba = cbas[0];
     cba.colorWriteMask = 0xF;
-    // Motion vectors: written by the opaque pass only, translucent surfaces keep what is behind
-    cbas[1].colorWriteMask = d.depth_write ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT : 0;
+    // Motion vectors: written by the opaque pass; translucent surfaces keep what
+    // is behind, except the dust where it is dense (its own laid over it by its
+    // w, r3d.frag; 0 for the rest)
+    cbas[1].colorWriteMask = d.depth_write || d.blend ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT : 0;
+    if (d.blend && !d.depth_write) {
+        cbas[1].blendEnable = VK_TRUE;
+        cbas[1].srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        cbas[1].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        cbas[1].colorBlendOp = VK_BLEND_OP_ADD;
+        cbas[1].srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        cbas[1].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        cbas[1].alphaBlendOp = VK_BLEND_OP_ADD;
+    }
     if (d.blend) {
         cba.blendEnable = VK_TRUE;
         cba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
@@ -1251,6 +1263,12 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
         static const bool soft_decals = getenv("SR2_SOFT_DECALS") && atoi(getenv("SR2_SOFT_DECALS")) == 1;
         u.soft[0] = soft_particles_ ? (soft_decals ? 1.0f : 2.0f) : 0.0f;
         u.soft[1] = 2.0f;
+        // The dust's own motion vectors where it is dense, from 30% to 50%
+        // opacity (r3d.frag). SR2_DUST_MV=0: the road's behind it, as before
+        static const bool dust_mv = !(getenv("SR2_DUST_MV") && atoi(getenv("SR2_DUST_MV")) == 0);
+        u.dust_mv[0] = dust_mv ? 1.0f : 0.0f;
+        u.dust_mv[1] = 0.3f;
+        u.dust_mv[2] = 0.5f;
         // Light in the game's fog, with the distance haze: strength, brighter
         // upwards, drifting banks
         if (w->fog_density > 0) {
