@@ -363,7 +363,14 @@ void R3DSceneBuilder::settle_player_car(R3DScene& out) {
         }
     }
     bool measured = raw > -0.1f && raw < 0.45f;
-    if (!measured && out.frame - lift.patch > 120) lift.height = -1;   // (kept through a jump, not for good)
+    // Kept while it cannot be measured, however long: in the air, and as the
+    // car drives off from a camera standing by the road (the championship's
+    // start: 40 m off, no road drawn within 4 m of it), where it was let go
+    // after two seconds and the car rose 31 cm in one frame and stayed up.
+    // Only another race starts afresh (car_lifts_). SR2_LIFT_EXPIRE=1: let go
+    // after two seconds, as before
+    static const bool expire = getenv("SR2_LIFT_EXPIRE") && atoi(getenv("SR2_LIFT_EXPIRE")) == 1;
+    if (expire && !measured && out.frame - lift.patch > 120) lift.height = -1;
     if (measured) {
         raw = std::max(raw, 0.0f);
         // A kerb, a bump under the patch: the measure steps from one frame to
