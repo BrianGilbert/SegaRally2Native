@@ -479,7 +479,8 @@ int main(int argc, char** argv) {
     }
     renderer.set_max_aspect(g_opt.max_aspect);
     renderer.set_pixel_aspect(g_opt.pixel_aspect);
-    renderer.set_smooth_2d(!g_opt.pixel_2d);
+    // The 2D layers: xBR smoothing with the HD HUD, the ROM's own pixels without it
+    renderer.set_smooth_2d(!g_opt.pixel_2d && !g_opt.classic_hud);
     renderer.set_hud_edges(!g_opt.hud_centre);
     renderer.set_distance_haze(g_opt.haze);
     renderer.set_bloom(g_opt.bloom);
@@ -1266,6 +1267,7 @@ int main(int argc, char** argv) {
                         g_opt.classic_hud = !s.hd_hud;
                         shown = ~0ull;   // compose the 2D layer again even while the game stands still
                     }
+                    renderer.set_smooth_2d(!g_opt.pixel_2d && !g_opt.classic_hud);
                     g_opt.classic_liveries = !s.hd_liveries;   // the scene builders pick it up with their next frame
                     if (!g_opt.arcade) {   // the race set-up: the game thread puts them in the operator settings
                         g_opt.difficulty = s.difficulty;
