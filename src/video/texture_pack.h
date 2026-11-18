@@ -40,6 +40,13 @@ public:
     // <dump_dir>/car/ (same file name), once per texture word
     void dump_car(uint32_t tex, R3DTextureRam& ram);
 
+    // A picture of the port's own, not one of the game's (the FOREST card of
+    // SELECT COURSE, R3DSceneBuilder::own_texture): the rows from top to
+    // bottom (fractions of the height) of a PNG, turned upside down when flip
+    // (a texture's first row in texture RAM may be the bottom of what it
+    // shows). Its slot, 0 when the file cannot be read
+    uint32_t own_picture(const std::string& file, float top, float bottom, bool flip);
+
     // Replacements loaded since the last call, to be uploaded by the renderer
     std::vector<RgbaImage> take_new_images();
 
@@ -73,6 +80,7 @@ private:
     std::unordered_set<uint64_t> available_;               // hashes with a replacement file
     std::unordered_map<uint64_t, uint32_t> slots_;         // loaded hash -> slot
     std::unordered_set<uint64_t> dumped_;
+    std::unordered_set<uint64_t> own_missing_;             // own pictures whose file could not be read
     std::unordered_map<uint32_t, uint64_t> car_words_;     // car texture word -> generation dumped
     std::unordered_set<uint64_t> car_dumped_;
     std::vector<RgbaImage> pending_;

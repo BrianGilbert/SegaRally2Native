@@ -47,10 +47,24 @@ double sr2_card_radius(double angle, double radius) {
     return double(float(radius * (1 + ab[0] * u + ab[1] * s2)));
 }
 
-// FOREST's card: for now the DESERT card's models (708, lit 709), the first
-// of each table
+// FOREST's card: the DESERT card's models (708, lit 709, the first of each
+// table) with its own pictures. The model number carries a mark (bit 28: the
+// model table's offset, number << 4, leaves it out), and the VROM address
+// drawn (sr2_model_address) is then the model's mirror: VROM's 32 MB repeat
+// over the 64 MB a node addresses, so the renderer draws the same polygons
+// and tells them apart from DESERT's (R3DSceneBuilder::own_texture, app.cpp:
+// the picture and name band from res/forest/card.png)
+constexpr uint32_t OWN_MODEL = 0x10000000;   // on the model number
+constexpr uint32_t VROM_MIRROR = 0x800000;   // on the VROM word address: 32 MB on
+
 uint32_t sr2_card_model(uint32_t table, uint32_t offset, bool) {
-    return rd32(offset >> 2 >= uint32_t(FOREST_CARD) ? table : table + offset);
+    if (offset >> 2 >= uint32_t(FOREST_CARD)) return rd32(table) | OWN_MODEL;
+    return rd32(table + offset);
+}
+
+uint32_t sr2_model_address(uint32_t ea, uint32_t model) {
+    uint32_t addr = rd32(ea);
+    return model & OWN_MODEL ? addr | VROM_MIRROR : addr;
 }
 
 uint32_t sr2_card_flag_load(uint32_t ea) {

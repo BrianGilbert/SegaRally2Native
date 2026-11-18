@@ -57,6 +57,10 @@ _set([0x61B4], ["c.f[3].d = sr2_card_radius(c.f[29].d, rs(c.f[27].d / c.f[3].d))
 # and its model: lwzx r3, r9, r29 (lit, 0xE9790) / lwzx r3, r9, r30 (0xE9780)
 _set([0x6210], ["c.r[3] = sr2_card_model(c.r[29], c.r[9], true);"])
 _set([0x6224], ["c.r[3] = sr2_card_model(c.r[30], c.r[9], false);"])
+# ... FOREST's, DESERT's with a mark, drawn by 0x3902C at the VROM's mirror
+# (own pictures, game_hooks.cpp): lwzx r4, r9, r0 the model's address (table
+# 0xA4BA8 + number << 4, r31 the number)
+_set([0x3906C], ["c.r[4] = sr2_model_address(c.r[9] + c.r[0], c.r[31]);"])
 
 # The cards' flags (0x47D424, a word each: the chosen card blinks) have room
 # for four; the fifth's word is somebody else's (0x47D434)

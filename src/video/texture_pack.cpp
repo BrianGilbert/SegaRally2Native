@@ -268,6 +268,41 @@ uint32_t TexturePack::dirty_slot(uint32_t tex, int w, int h, uint64_t hash) {
     return result;
 }
 
+uint32_t TexturePack::own_picture(const std::string& file, float top, float bottom, bool flip) {
+    char part[48];
+    snprintf(part, sizeof(part), "|%.4f|%.4f|%d", top, bottom, int(flip));
+    std::string name = file + part;
+    uint64_t id = fnv1a_bytes(name.data(), name.size()) ^ 0x0A0A0A0A0A0A0A0Aull;   // (never a texture's hash)
+    auto loaded = slots_.find(id);
+    if (loaded != slots_.end()) return loaded->second;
+    if (own_missing_.count(id) || slots_.size() + 1 >= max_slots_) return 0;
+    RgbaImage full;
+    if (!png_load(file, full.w, full.h, full.rgba)) {
+        fprintf(stderr, "[textures] could not read %s\n", file.c_str());
+        own_missing_.insert(id);
+        return 0;
+    }
+    int y0 = std::clamp(int(std::lround(top * full.h)), 0, full.h);
+    int y1 = std::clamp(int(std::lround(bottom * full.h)), y0, full.h);
+    if (y1 == y0) {
+        own_missing_.insert(id);
+        return 0;
+    }
+    RgbaImage img;
+    img.w = full.w;
+    img.h = y1 - y0;
+    img.rgba.resize(size_t(img.w) * img.h * 4);
+    size_t row = size_t(img.w) * 4;
+    for (int y = 0; y < img.h; y++)
+        memcpy(&img.rgba[size_t(y) * row], &full.rgba[size_t(flip ? y1 - 1 - y : y0 + y) * row], row);
+    uint32_t slot = uint32_t(slots_.size() + 1);
+    img.slot = slot;
+    slots_[id] = slot;
+    printf("[textures] %s, rows %d-%d: own picture %dx%d\n", file.c_str(), y0, y1, img.w, img.h);
+    pending_.push_back(std::move(img));
+    return slot;
+}
+
 std::vector<RgbaImage> TexturePack::take_new_images() {
     std::vector<RgbaImage> out;
     out.swap(pending_);
