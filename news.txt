@@ -13,6 +13,12 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[29] 19 November 2026
+- PRACTICE has a fifth course, FOREST: the unused stage hidden in the ROM, marked PROTOTYPE since it was never finished.
+- HD number plate: the HD "1" should now only show when you are 1st; other positions keep the game's own plate.
+- Improvements and optimizations for smooth motion.
+- Tyre tracks should sit on the ground again, and stay visible with soft particles on.
+
 [28] 18 November 2026
 - HD HUD: there is now room in memory for all the HD pictures, so in long sessions (a championship, for example) they should no longer go back to the original low-res ones.
 - OPTIONS > WHEEL: pressing Enter while the "BUTTON n - WHEEL" message is on screen should no longer leave the window stuck.
