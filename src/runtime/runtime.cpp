@@ -407,6 +407,19 @@ void dev_write8(uint32_t a, uint8_t v) {
     if (a == 0xF0080000) {   // MIDI byte to the sound board
         g_irq_state &= ~0x40;
         g_sound.midi_write(v);
+        // Debugging aid: SR2_MIDI_LOG=file writes the bytes, a line per frame
+        // with the select step (0x22435C) and the round (0x22CF48)
+        static FILE* midi_log = getenv("SR2_MIDI_LOG") ? fopen(getenv("SR2_MIDI_LOG"), "w") : nullptr;
+        static uint64_t midi_frame = ~0ull;
+        if (midi_log) {
+            if (g_frame != midi_frame) {
+                midi_frame = g_frame;
+                fprintf(midi_log, "\n%llu step %d round %d:", (unsigned long long)g_frame, int32_t(rd32(0x22435C)),
+                        int32_t(rd32(0x22CF48)));
+                fflush(midi_log);
+            }
+            fprintf(midi_log, " %02x", v);
+        }
     }
     if (a == 0xF0080004) {
         g_midi_ctrl = v;
