@@ -1246,7 +1246,10 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
                 u.rt[3] = dlaa_.ready() ? golden - std::floor(golden) : 0.0f;
             }
         }
-        u.soft[0] = soft_particles_ ? 1.0f : 0.0f;
+        // (2: what lies on the surface behind it, as the tyre tracks on the
+        // sand, is not softened, r3d.frag; SR2_SOFT_DECALS=1: it is, as before)
+        static const bool soft_decals = getenv("SR2_SOFT_DECALS") && atoi(getenv("SR2_SOFT_DECALS")) == 1;
+        u.soft[0] = soft_particles_ ? (soft_decals ? 1.0f : 2.0f) : 0.0f;
         u.soft[1] = 2.0f;
         // Light in the game's fog, with the distance haze: strength, brighter
         // upwards, drifting banks

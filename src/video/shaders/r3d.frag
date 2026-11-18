@@ -732,9 +732,25 @@ void main() {
     // Textured ones only: the game's untextured black patch under each car (its
     // shadow) lies 3 cm over the road once the car is set down on it
     // (settle_player_car), and faded over 2 m it was gone
+    // Not what lies on the surface behind it (atm.soft.x 2): the tyre tracks
+    // the game lays on the sand, a few centimetres over it, were faded to
+    // nothing. Told by its distance from the eye changing across the screen
+    // as that of the surface behind does (a sprite standing in the ground, a
+    // cloud, change otherwise)
     if (vp.quality.x < 0.0 && atm.soft.x > 0.0 && (flags & (WORLD | TEXTURED)) == (WORLD | TEXTURED)) {
-        float d = texelFetch(scene_depth, ivec2(gl_FragCoord.xy), 0).r;
-        if (d > 0.0) c.a *= clamp((view_pos.z + 1e-3 / d) / atm.soft.y, 0.0, 1.0);
+        ivec2 at = ivec2(gl_FragCoord.xy), last = textureSize(scene_depth, 0) - 1;
+        float d = texelFetch(scene_depth, at, 0).r;
+        bool lying = false;
+        if (atm.soft.x > 1.5 && d > 0.0 && at.x < last.x && at.y < last.y) {
+            float dx = texelFetch(scene_depth, at + ivec2(1, 0), 0).r, dy = texelFetch(scene_depth, at + ivec2(0, 1), 0).r;
+            if (dx > 0.0 && dy > 0.0) {
+                vec2 behind = vec2(1e-3 / dx - 1e-3 / d, 1e-3 / dy - 1e-3 / d);   // the surface behind: its distance's change a pixel on
+                vec2 own = vec2(dFdx(-view_pos.z), dFdy(-view_pos.z));
+                float size = abs(behind.x) + abs(behind.y) + abs(own.x) + abs(own.y);
+                lying = size > 1e-6 && abs(behind.x - own.x) + abs(behind.y - own.y) < 0.15 * size;
+            }
+        }
+        if (d > 0.0 && !lying) c.a *= clamp((view_pos.z + 1e-3 / d) / atm.soft.y, 0.0, 1.0);
     }
     out_color = c;
     // Bloom source: fire, explosions and lights are drawn unlit (luminous);
