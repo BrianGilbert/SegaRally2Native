@@ -534,6 +534,7 @@ int main(int argc, char** argv) {
     // pictures) and the layers below the 3D image (192-247; the backdrops of
     // SkyPack use 248-255). More pictures than slots reuse the oldest (pack2d.h)
     Pack2D pack2d, pack2d_back;
+    Pack2D::set_ram_reader([](uint32_t addr) { return rd32(addr); });   // their "when" lines
     pack2d.init("textures/2d", 1, 191);
     pack2d_back.init("textures/2d_back", 192, SkyPack::FIRST_SLOT - 1);
     static_assert(SkyPack::LAST_SLOT == Pack2D::MAX_SLOTS - 1, "the backdrops take the last slots");
