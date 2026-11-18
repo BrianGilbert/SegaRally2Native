@@ -1563,7 +1563,14 @@ int main(int argc, char** argv) {
         // taken once the picture reaches the one built. Otherwise at once.
         // While interpolating the frames come from the preparation thread
         // (their lateness includes its work), otherwise straight from the game
-        bool interpolating = g_opt.interp && g_opt.replay.empty() && !g_opt.shot_frame;
+        // The attract is shown as the game draws it, whatever the setting: its
+        // cameras beside the road, their long lenses and the cars going past
+        // them close up were where smooth motion went wrong (the frames in
+        // between have nothing of the arcade's own to go by), and an arcade
+        // ORIGINAL start shows it first. The game itself follows the setting.
+        // SR2_ATTRACT_SMOOTH=1: smooth there too (to compare)
+        static const bool attract_smooth = getenv("SR2_ATTRACT_SMOOTH") && atoi(getenv("SR2_ATTRACT_SMOOTH")) == 1;
+        bool interpolating = g_opt.interp && g_opt.replay.empty() && !g_opt.shot_frame && (attract_smooth || !g_in_attract);
         if (interpolating != prep_on) {   // a frame it made earlier is not one to go back to
             prep_on = interpolating;
             std::lock_guard<std::mutex> lock(ready_mutex);
