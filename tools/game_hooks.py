@@ -77,3 +77,13 @@ _set([0x540C, 0x57E0, 0x5AE8], ["c.r[6] = sr2_card_palette(c.r[9], c.r[0]);"])
 
 # The race set-up: the card's course id, lwzx r0, r9, r0 (0xF1F20: 3, 2, 4, 5)
 _set([0x46AF8, 0x48480], ["c.r[0] = sr2_course_id(c.r[9], c.r[0]);"])
+
+# FOREST's sounds at the start of the race (0xF1674: now, later, frames
+# between) and at the goal (0xF16D4) were never filled in (-1: the sound
+# board gets 00 00 00 and rings a bell for seconds): MOUNTAIN's, the course
+# most like it (game_hooks.cpp). 0x3E4B8 start, 0x3E54C / 0x3E588 goal
+_set([0x3E50C], ["c.r[0] = sr2_course_sound(c.r[31] + 8);"])           # lwz r0, 8(r31)
+_set([0x3E514], ["c.r[0] = sr2_course_sound(c.r[31] + 4);"])           # lwz r0, 4(r31)
+_set([0x3E524], ["c.r[3] = sr2_course_sound(c.r[30] + c.r[29]);"])     # lwzx r3, r30, r29
+_set([0x3E570], ["c.r[3] = sr2_course_sound(c.r[9] + c.r[0]);"])       # lwzx r3, r9, r0
+_set([0x3E5B0], ["c.r[3] = sr2_course_sound(c.r[9] + 4);"])            # lwz r3, 4(r9)

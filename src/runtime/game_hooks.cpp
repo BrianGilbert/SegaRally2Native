@@ -139,3 +139,14 @@ uint32_t sr2_card_palette(uint32_t table, uint32_t offset) {
 uint32_t sr2_course_id(uint32_t table, uint32_t offset) {
     return offset >> 2 == uint32_t(FOREST_CARD) ? FOREST_COURSE : rd32(table + offset);
 }
+
+// The sounds of a course at the start of the race (table 0xF1674) and at the
+// goal (0xF16D4), 12 bytes a course: FOREST's are -1 (never filled in: the
+// sound board got 00 00 00 and rang for seconds). It takes MOUNTAIN's
+uint32_t sr2_course_sound(uint32_t ea) {
+    constexpr uint32_t ROW = 12, MOUNTAIN = 2;
+    for (uint32_t table : {0xF1674u, 0xF16D4u})
+        if (ea >= table + FOREST_COURSE * ROW && ea < table + (FOREST_COURSE + 1) * ROW)
+            return rd32(ea + (MOUNTAIN - FOREST_COURSE) * ROW);
+    return rd32(ea);
+}

@@ -18,3 +18,4 @@ void sr2_card_flag_store(uint32_t ea, uint32_t v);
 void sr2_card_flag_store_all(uint32_t ea, uint32_t v);                // the loops that set them all (four)
 uint32_t sr2_card_palette(uint32_t table, uint32_t offset);           // the 2D picture's palette for a card
 uint32_t sr2_course_id(uint32_t table, uint32_t offset);              // the race set-up: card -> course id
+uint32_t sr2_course_sound(uint32_t ea);                               // a course's sound at the start / goal (FOREST: MOUNTAIN's)
