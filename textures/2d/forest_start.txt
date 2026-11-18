@@ -1,4 +1,4 @@
-# 2D replacement made from D:\Emus\SegaRally2Native\build\test_run_bell\out\2d\capture_1167
+# 2D replacement made from out/2d/capture_1167 (FOREST's START!! screen, MOUNTAIN's picture in the ROM)
 rect 0 0 62 48
 when 22cf44 1
 ae88d9c54434ee50
