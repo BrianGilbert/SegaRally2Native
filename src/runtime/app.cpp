@@ -221,6 +221,8 @@ static void save_settings(const FrontendSettings& s) {
         top.experience = s.experience;
         top.check_updates = s.check_updates;
         top.news_seen = s.news_seen;
+        top.telemetry = s.telemetry;
+        top.telemetry_port = s.telemetry_port;
         out = top.text(false) + "[arcade]\n" + out;
     }
     if (FILE* fp = fopen("save/settings.ini", "w")) {

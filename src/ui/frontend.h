@@ -81,6 +81,10 @@ struct FrontendSettings {
     bool menu_music = true; // the game's Main Title in the menus
     bool check_updates = true;     // at launch, news.txt on GitHub: a window with what is new and UPDATE NOW
     int news_seen = 0;             // the newest news.txt entry the player closed with LATER
+    // settings.ini only: UDP telemetry for SimHub and motion rigs (runtime/telemetry.h),
+    // to 127.0.0.1 on this port. Off by default
+    bool telemetry = false;
+    int telemetry_port = 20777;
 
     // save/settings.ini; missing keys keep their current value. section: "" the
     // file's first one (PC EDITION and the keys of the whole game), "arcade" ARCADE ORIGINAL's

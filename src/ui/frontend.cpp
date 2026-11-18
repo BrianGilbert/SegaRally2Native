@@ -143,7 +143,7 @@ void FrontendSettings::load(const char* path, const char* section) {
         std::string k = key, v = value;
         bool on = v == "1" || v == "on" || v == "true";
         // (the keys of the whole game only in the first section)
-        if (!top && (k == "experience" || k == "check_updates" || k == "news_seen")) continue;
+        if (!top && (k == "experience" || k == "check_updates" || k == "news_seen" || k == "telemetry" || k == "telemetry_port")) continue;
         if (k == "experience") experience = v == "arcade" ? 1 : 0;
         else if (k == "aspect") {
             static const char* const NAMES[5] = {"auto", "32:9", "21:9", "16:9", "4:3"};
@@ -200,6 +200,8 @@ void FrontendSettings::load(const char* path, const char* section) {
         else if (k == "menu_music") menu_music = on;
         else if (k == "check_updates") check_updates = on;
         else if (k == "news_seen") news_seen = std::max(0, atoi(value));
+        else if (k == "telemetry") telemetry = on;
+        else if (k == "telemetry_port") telemetry_port = std::clamp(atoi(value), 1, 65535);
     }
     fclose(f);
 }
@@ -230,7 +232,8 @@ std::string FrontendSettings::text(bool section) const {
     snprintf(buf, sizeof(buf), "dlss_model = %s\n", MODELS[std::clamp(dlss_model, 0, 3)]);
     out += buf;
     if (!section) {
-        snprintf(buf, sizeof(buf), "check_updates = %d\nnews_seen = %d\n", check_updates, news_seen);
+        snprintf(buf, sizeof(buf), "check_updates = %d\nnews_seen = %d\ntelemetry = %d\ntelemetry_port = %d\n", check_updates, news_seen,
+                 telemetry, telemetry_port);
         out += buf;
     }
     snprintf(buf, sizeof(buf), "rt_reflections = %d\nglobal_illumination = %s\ndust = %s\ndifficulty = %s\nhd_liveries = %d\ntrigger_rumble = %d\n", reflections, gi ? "low" : "off", dust ? "enhanced" : "original", DIFFICULTY_KEYS[std::clamp(difficulty, 0, 4)], hd_liveries, trigger_rumble);
