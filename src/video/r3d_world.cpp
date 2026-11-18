@@ -594,6 +594,12 @@ static void settle_ground_marks(const std::vector<R3DInstance>& list, const floa
         }
         if (!near) continue;
         const R3DInstance& in = list[m.n];
+        static const bool log = getenv("SR2_MARKS_LOG") != nullptr;   // (debugging aid: each mark set down, stdout)
+        if (log) {
+            float lo = 1e30f, hi = -1e30f;
+            for (size_t q = m.first; q < m.end; q++) lo = std::min(lo, queries[q].h - queries[q].ground), hi = std::max(hi, queries[q].h - queries[q].ground);
+            printf("[mark] frame %llu model %06X corners %zu over the ground %.3f to %.3f\n", (unsigned long long)out.frame, in.model, m.end - m.first, lo, hi);
+        }
         for (uint32_t i = in.trans[0]; i < in.trans[1]; i++) {
             float gap = queries[m.first + (i - in.trans[0])].h - queries[m.first + (i - in.trans[0])].ground;
             if (gap <= 0.03f) continue;
