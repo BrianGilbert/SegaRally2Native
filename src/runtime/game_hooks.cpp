@@ -136,8 +136,41 @@ uint32_t sr2_card_palette(uint32_t table, uint32_t offset) {
     return rd32(offset >> 2 >= uint32_t(FOREST_CARD) ? table : table + offset);
 }
 
+// FOREST's practice times were never filled in: 999 s and no extensions
+// (the clock filled for 15 s at the start, ticking, and never ran down).
+// Written here in their place, in the RAM copy of the tables (pointers per
+// mode at 0xE8348; rows per difficulty in the game's numbering: NORMAL,
+// HARD, VERY HARD, VERY EASY, EASY), from FOREST's own championship times
+// (13 s to the first checkpoint, 28 to the second, 32 to the line: two
+// checkpoints a lap) as MOUNTAIN's practice is to its championship: 60 s at
+// the start (80 SPECIAL), the first extension by difficulty, then a little
+// more than the championship's, 12 s from the line to the first checkpoint
+static void forest_practice_times() {
+    constexpr uint32_t MODES = 0xE8348;   // per mode: ?, courses, words per row, table
+    static const int first[5] = {31, 29, 24, 46, 36};
+    for (int special = 0; special < 2; special++) {
+        uint32_t mode = MODES + 16 * uint32_t(2 + special);   // practice, practice SPECIAL
+        uint32_t courses = rd32(mode + 4), words = rd32(mode + 8), table = rd32(mode + 12);
+        int laps = special ? 10 : 3;
+        if (words < uint32_t(3 * laps + 1)) continue;
+        for (uint32_t diff = 0; diff < 5; diff++) {
+            uint32_t row = table + 4 * words * (diff * courses + FOREST_COURSE);
+            uint32_t at = row;
+            wr32(at, uint32_t((special ? 80 : 60) * 60)), at += 4;
+            for (int lap = 0; lap < laps; lap++) {
+                if (lap) wr32(at, 12 * 60), at += 4;   // the line, to the first checkpoint
+                wr32(at, uint32_t((lap ? 30 : first[diff]) * 60)), at += 4;   // to the second
+                if (lap + 1 < laps) wr32(at, 34 * 60), at += 4;               // to the line
+            }
+            wr32(at, ~0u);
+        }
+    }
+}
+
 uint32_t sr2_course_id(uint32_t table, uint32_t offset) {
-    return offset >> 2 == uint32_t(FOREST_CARD) ? FOREST_COURSE : rd32(table + offset);
+    if (offset >> 2 != uint32_t(FOREST_CARD)) return rd32(table + offset);
+    forest_practice_times();
+    return FOREST_COURSE;
 }
 
 // The sounds of a course at the start of the race (table 0xF1674) and at the
