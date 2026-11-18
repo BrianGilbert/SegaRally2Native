@@ -207,6 +207,7 @@ add_executable(SegaRally2 WIN32
     src/runtime/wheel.cpp
     src/runtime/scsi53c810.cpp
     src/runtime/stats.cpp
+    src/runtime/game_hooks.cpp
     src/runtime/achievements_csv.cpp
     src/ui/achievement_toast.cpp
     src/runtime/options.cpp

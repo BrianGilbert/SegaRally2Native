@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -48,6 +49,7 @@ enum : uint32_t {
     R3D_ACTOR = 1 << 18,       // a model of the world turned its own way: the other cars, people (r3d_world.cpp)
     R3D_NO_SHADOW = 1 << 20,   // receives no sun shadows (the dust's particles)
     R3D_DUST = 1 << 23,        // DUST: ENHANCED: a particle drawn by r3d.frag's dust() (r3d_dust.cpp)
+    R3D_OWN_TEXTURE = 1 << 24, // replace is a picture of the port's own (R3DSceneBuilder::own_texture), not the pack's
 };
 
 struct R3DViewport {
@@ -142,6 +144,22 @@ public:
         pack_ = pack;
         texture_ram_ = ram;
     }
+
+    // Pictures of the port's own for models the port draws itself: copies of
+    // the game's in VROM the game never uses (from own_from on, set_own_models),
+    // so the same polygons can be told apart from the game's. Their polygons
+    // with texture word tex take the picture (the rows top to bottom of a
+    // PNG, TexturePack::own_picture). pictures: where they are loaded (kept
+    // apart from set_texture_pack, which may be off)
+    struct OwnPicture {
+        std::string file;
+        float top = 0, bottom = 1;
+        bool flip = false;
+        std::string over;   // optional PNG of the same size drawn over it (FOREST's PROTOTYPE badge)
+    };
+    void set_own_models(uint32_t own_from) { own_from_ = own_from; }
+    void set_own_pictures(TexturePack* pictures) { own_pictures_ = pictures; }
+    void own_texture(uint32_t tex, const OwnPicture& picture) { own_textures_[tex] = picture; }
 
 private:
     float stage_ms_[7] = {};   // nodes, track, screen, pack, pair, smooth, sync
@@ -248,6 +266,10 @@ private:
     TexturePack* pack_ = nullptr;
     R3DTextureRam* texture_ram_ = nullptr;
     std::unordered_map<uint32_t, uint32_t> frame_slots_;   // texture word -> slot, this frame
+    TexturePack* own_pictures_ = nullptr;
+    uint32_t own_from_ = 0x1000000;                           // VROM words of own models (none)
+    std::unordered_map<uint32_t, OwnPicture> own_textures_;   // texture word -> picture (own models only)
+    std::unordered_set<uint32_t> own_seen_;                   // own models' texture words already logged
 
     // Models drawn in each viewport, for the interpolation (copies of a model
     // are paired by place) and the world tracking

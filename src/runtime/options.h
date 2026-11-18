@@ -26,6 +26,8 @@ struct Options {
     int speed_kmh = -1;              // 0 MPH, 1 KM/H (the test menu's order)
     int free_play = -1;              // COIN ASSIGNMENTS: 1 FREE PLAY, 0 coins; -1 as the EEPROM says
     bool arcade = false;             // EXPERIENCE ARCADE ORIGINAL: the game as the cabinet ran it (app.cpp)
+    bool forest = true;              // --no-forest: SELECT COURSE (practice) without its fifth card, FOREST,
+                                     // the stage the ROM has but no select reaches (game_hooks.cpp; never in ARCADE ORIGINAL)
     // Picture
     float supersample = 1.0f;        // --scale: internal 3D resolution factor
     int msaa = 4;                    // --msaa: samples per pixel (1 = off)

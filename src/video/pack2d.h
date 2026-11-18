@@ -12,6 +12,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "image_io.h"
@@ -31,6 +32,8 @@ public:
     // of the one not shown for longest (its file is read again if it comes back)
     void init(const std::string& dir, uint32_t first_slot = 1, uint32_t last_slot = MAX_SLOTS - 1);
     bool empty() const { return entries_.empty(); }
+    // How "when" lines read the game's RAM (none: those replacements never show)
+    static void set_ram_reader(uint32_t (*read)(uint32_t addr)) { ram_reader_ = read; }
 
     // Hashes of all the cells of a 496x384 BGRA image
     static void hash_cells(const uint32_t* front, std::vector<uint64_t>& out);
@@ -60,6 +63,7 @@ public:
     std::vector<RgbaImage> take_new_images();
 
 private:
+    static inline uint32_t (*ram_reader_)(uint32_t) = nullptr;
     struct Entry {
         std::string name;
         int cx = 0, cy = 0, cw = 0, ch = 0;   // rectangle in cells
@@ -68,6 +72,10 @@ private:
         bool failed = false;                  // its file could not be read: not tried again
         int min_share = 50;   // "match P" line: P% of the reference cells must be unchanged (titles that differ
                               // only in a digit, STAGE1 and STAGE5, need nearly all of them)
+        // "when ADDR VALUE" lines (hex address, decimal value): shown only while
+        // those words of the game's RAM hold those values (FOREST's start
+        // screen is MOUNTAIN's picture: "when 22cf44 1", the course id)
+        std::vector<std::pair<uint32_t, uint32_t>> when;
         bool cover = false;   // "cover" line: the picture hides every cell of its box (glints over a text, the
                               // picture behind it, letters wider than the old ones)
         // A second state of the same cells (<name>_lit.txt / .png: a bar graph

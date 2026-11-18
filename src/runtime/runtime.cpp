@@ -24,6 +24,7 @@
 #include "inputs.h"
 #include "wheel.h"
 #include "fns.h"
+#include "game_hooks.h"
 #include "runtime.h"
 #include "drive_board.h"
 #include "jtag.h"
@@ -406,6 +407,19 @@ void dev_write8(uint32_t a, uint8_t v) {
     if (a == 0xF0080000) {   // MIDI byte to the sound board
         g_irq_state &= ~0x40;
         g_sound.midi_write(v);
+        // Debugging aid: SR2_MIDI_LOG=file writes the bytes, a line per frame
+        // with the select step (0x22435C) and the round (0x22CF48)
+        static FILE* midi_log = getenv("SR2_MIDI_LOG") ? fopen(getenv("SR2_MIDI_LOG"), "w") : nullptr;
+        static uint64_t midi_frame = ~0ull;
+        if (midi_log) {
+            if (g_frame != midi_frame) {
+                midi_frame = g_frame;
+                fprintf(midi_log, "\n%llu step %d round %d:", (unsigned long long)g_frame, int32_t(rd32(0x22435C)),
+                        int32_t(rd32(0x22CF48)));
+                fflush(midi_log);
+            }
+            fprintf(midi_log, " %02x", v);
+        }
     }
     if (a == 0xF0080004) {
         g_midi_ctrl = v;
@@ -1043,6 +1057,10 @@ static bool in_attract() {
 constexpr uint32_t SR2_SELECT_STEP = 0x22435C, SR2_SELECT_MODE = 0x22432C, SR2_SELECT_COURSE = 0x224328,
                    SR2_SELECT_CAR = 0x224324, SR2_SELECT_GEARS = 0x224334;
 
+// DEBUG's FOREST (course 4): SELECT COURSE's fifth card (game_hooks.cpp),
+// there when FOREST is on
+constexpr int DEBUG_FOREST = 4;
+
 // DEBUG (menu): from SELECT GAME on to a practice race of the course, car and
 // transmission asked for, unseen. Each select gets its choice written and the
 // pedal (it confirms them all); the course again on every later select, as its
@@ -1050,12 +1068,14 @@ constexpr uint32_t SR2_SELECT_STEP = 0x22435C, SR2_SELECT_MODE = 0x22432C, SR2_S
 static bool debug_jump_frame(uint64_t from) {
     stats_game_cheated();   // a race jumped to: no records
     int choice = g_debug_jump;
-    uint32_t course = uint32_t(choice & 0xF) & 3, car = uint32_t(choice >> 4 & 0xF) & 7, gears = uint32_t(choice >> 8 & 1);
+    const bool forest = (choice & 0xF) == DEBUG_FOREST && sr2_cards() > DEBUG_FOREST;
+    uint32_t course = forest ? DEBUG_FOREST : uint32_t(choice & 0xF) & 3, car = uint32_t(choice >> 4 & 0xF) & 7,
+             gears = uint32_t(choice >> 8 & 1);
     Inputs& p = g_inputs;
     int32_t step = int32_t(rd32(SR2_SELECT_STEP));
     auto finish = [&](const char* why) {
-        printf("[debug] %s: step %d after %llu frames (course %u car %u gears %u)\n", why, step,
-               (unsigned long long)(g_frame - from), course, car, gears);
+        printf("[debug] %s: step %d after %llu frames (course %u%s car %u gears %u)\n", why, step,
+               (unsigned long long)(g_frame - from), course, forest ? " = FOREST" : "", car, gears);
         p.accel = 0;
         g_debug_jump = -1;
         return true;

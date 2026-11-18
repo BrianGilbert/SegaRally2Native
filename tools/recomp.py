@@ -30,6 +30,10 @@ SPR_SIDE_EFFECTS = {22, 268, 269, 284, 285}   # DEC and TB go through the runtim
 # next event
 IDLE_LOOPS = set()
 
+# Single instructions replaced by C++ of the port's own (tools/game_hooks.py)
+from game_hooks import HOOKS   # noqa: E402
+HOOKS_USED = set()
+
 
 def mask(mb, me):
     m = 0
@@ -110,7 +114,11 @@ class FuncGen:
         addrs = sorted(self.body)
         code = {}
         for a in addrs:
-            code[a] = self.insn(self.body[a])
+            hook = HOOKS.get(a)
+            if hook is not None:
+                assert self.body[a].branch is None and not self.body[a].indirect and not self.body[a].ends_block, hex(a)
+                HOOKS_USED.add(a)
+            code[a] = hook if hook is not None else self.insn(self.body[a])
         # The labels in use are now known
         out.append(f"void fn_{self.entry:08X}(Ctx& c) {{")
         out.append(f"    ENTER(0x{self.entry:08X});")
@@ -133,7 +141,7 @@ class FuncGen:
             if flow and pending:
                 out.append(f"    c.cycles += {pending};")
                 pending = 0
-            out.append(f"    /* {a:08X} {ins.text()} */")
+            out.append(f"    /* {a:08X} {ins.text()}{'  (game_hooks.py)' if a in HOOKS else ''} */")
             for s in stmts:
                 out.append("    " + s)
             nxt = (a + 4) & 0xFFFFFFFF   # wrap at the top of the address space
@@ -483,7 +491,7 @@ def main():
             open(path, "w").write(new)
         files.append(name)
     with open(os.path.join(outdir, "fns.h"), "w") as fo:
-        fo.write('#pragma once\n#include "ppc_rt.h"\n\n')
+        fo.write('#pragma once\n#include "ppc_rt.h"\n#include "game_hooks.h"\n\n')
         for e in entries:
             fo.write(f"void fn_{e:08X}(Ctx& c);\n")
         fo.write("\nstruct FnEntry { uint32_t addr; void (*fn)(Ctx&); };\n")
@@ -496,6 +504,9 @@ def main():
     with open(os.path.join(outdir, "files.cmake"), "w") as fo:
         fo.write("set(GEN_SOURCES\n" + "".join(f"    ${{GEN_DIR}}/{n}\n" for n in files + ["table.cpp"]) + ")\n")
     print(f"{len(entries)} functions in {len(files)} files, {bad} untranslated instructions")
+    missing = set(HOOKS) - HOOKS_USED
+    if missing:   # a hook on an address no function translates: the game's code is not what it was written for
+        sys.exit("error: hooks not placed (tools/game_hooks.py): " + ", ".join(f"0x{a:X}" for a in sorted(missing)))
     if LEFT_OUT["oe"] or LEFT_OUT["fp_rc"]:
         print(f"warning: {len(LEFT_OUT['oe'])} instructions with OE=1 (XER overflow not computed), "
               f"{len(LEFT_OUT['fp_rc'])} floating-point ones with Rc=1 (CR1 not updated)")

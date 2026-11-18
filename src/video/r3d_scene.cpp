@@ -1101,7 +1101,7 @@ void R3DSceneBuilder::apply_texture_pack(R3DScene& out) {
     frame_slots_.clear();
     for (size_t i = 0; i + 2 < out.vertices.size(); i += 3) {
         R3DVertex* tri = &out.vertices[i];
-        if (!(tri[0].flags & R3D_TEXTURED)) continue;
+        if (!(tri[0].flags & R3D_TEXTURED) || (tri[0].flags & R3D_OWN_TEXTURE)) continue;
         auto it = frame_slots_.find(tri[0].tex);
         uint32_t slot = it != frame_slots_.end() ? it->second
                                                  : (frame_slots_[tri[0].tex] = pack_->lookup(tri[0].tex, *texture_ram_));
@@ -1367,6 +1367,8 @@ void R3DSceneBuilder::model(uint32_t addr, const Mat& m, const Attribs& a) {
     uint64_t instance = uint64_t(instance_key(addr)) << 32;
     uint32_t drawn = 0;
     const uint32_t start_addr = addr;
+    // One the port draws itself (own_texture)
+    const bool own = own_pictures_ && (addr & 0xFFFFFF) >= std::max<uint32_t>(own_from_, 0x100000);
     uint32_t opaque_from = uint32_t(opaque_.size()), trans_from = uint32_t(trans_.size()), back_from = uint32_t(backs_.size());
 
     for (int guard = 0; guard < 65536; guard++) {
@@ -1462,6 +1464,17 @@ void R3DSceneBuilder::model(uint32_t addr, const Mat& m, const Attribs& a) {
                 flags |= ((h[6] >> 5) & 3) << R3D_SHININESS_SHIFT;
                 if (((h[6] >> 24) & 0x7F) == 2) flags |= R3D_INVERT_RGB;
                 if (h[4] & 0x80) flags |= R3D_TRANSLATOR;
+                uint32_t own_slot = 0;
+                if (own && textured) {
+                    auto pic = own_textures_.find(tex);
+                    if (pic != own_textures_.end())
+                        own_slot = own_pictures_->own_picture(pic->second.file, pic->second.top, pic->second.bottom, pic->second.flip,
+                                                               pic->second.over);
+                    if (own_seen_.insert(tex).second)
+                        printf("[r3d] own model %06x: texture %08x %s\n", start_addr & 0xFFFFFF, tex,
+                               own_slot ? "-> own picture" : pic != own_textures_.end() ? "(own picture missing)" : "(the game's)");
+                    if (own_slot) flags |= R3D_OWN_TEXTURE;
+                }
                 float fog = float((h[6] >> 11) & 0x1F) / 16.0f;
                 float spec_coef = float(h[0] >> 26) / 63.0f;
 
@@ -1480,7 +1493,7 @@ void R3DSceneBuilder::model(uint32_t addr, const Mat& m, const Attribs& a) {
                     out[i].shade = v[i].shade;
                     out[i].fog = fog;
                     out[i].spec = spec_coef;
-                    out[i].replace = 0;
+                    out[i].replace = own_slot;
                 }
                 // Back-face test with the face normal (spec 5.4)
                 float fn[3];

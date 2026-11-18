@@ -67,6 +67,7 @@ const std::vector<Entry>& table() {
                    for (int d = 0; d < 5; d++)
                        if (strcmp(v, NAMES[d]) == 0) o.difficulty = d;
                }),
+        off("--no-forest", &Options::forest, "SELECT COURSE with the arcade's four courses (no FOREST, the unused fifth)"),
         section("Picture"),
         real("--scale", &Options::supersample, "internal 3D resolution multiplied by F (1)"),
         num("--msaa", &Options::msaa, "samples per pixel (4; 1 = no MSAA)"),
