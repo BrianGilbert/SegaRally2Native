@@ -141,6 +141,7 @@ public:
         std::string file;
         float top = 0, bottom = 1;
         bool flip = false;
+        std::string over;   // optional PNG of the same size drawn over it (FOREST's PROTOTYPE badge)
     };
     void set_own_models(uint32_t own_from) { own_from_ = own_from; }
     void set_own_pictures(TexturePack* pictures) { own_pictures_ = pictures; }

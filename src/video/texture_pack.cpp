@@ -268,10 +268,11 @@ uint32_t TexturePack::dirty_slot(uint32_t tex, int w, int h, uint64_t hash) {
     return result;
 }
 
-uint32_t TexturePack::own_picture(const std::string& file, float top, float bottom, bool flip) {
+uint32_t TexturePack::own_picture(const std::string& file, float top, float bottom, bool flip,
+                                  const std::string& over) {
     char part[48];
     snprintf(part, sizeof(part), "|%.4f|%.4f|%d", top, bottom, int(flip));
-    std::string name = file + part;
+    std::string name = file + part + "|" + over;
     uint64_t id = fnv1a_bytes(name.data(), name.size()) ^ 0x0A0A0A0A0A0A0A0Aull;   // (never a texture's hash)
     auto loaded = slots_.find(id);
     if (loaded != slots_.end()) return loaded->second;
@@ -281,6 +282,18 @@ uint32_t TexturePack::own_picture(const std::string& file, float top, float bott
         fprintf(stderr, "[textures] could not read %s\n", file.c_str());
         own_missing_.insert(id);
         return 0;
+    }
+    if (!over.empty()) {
+        RgbaImage top_image;
+        if (!png_load(over, top_image.w, top_image.h, top_image.rgba))
+            fprintf(stderr, "[textures] could not read %s\n", over.c_str());
+        else if (top_image.w != full.w || top_image.h != full.h)
+            fprintf(stderr, "[textures] %s is not the size of %s, left out\n", over.c_str(), file.c_str());
+        else
+            for (size_t i = 0; i < full.rgba.size(); i += 4) {
+                const uint8_t* o = &top_image.rgba[i];
+                for (int k = 0; k < 3; k++) full.rgba[i + k] = uint8_t((o[k] * o[3] + full.rgba[i + k] * (255 - o[3]) + 127) / 255);
+            }
     }
     int y0 = std::clamp(int(std::lround(top * full.h)), 0, full.h);
     int y1 = std::clamp(int(std::lround(bottom * full.h)), y0, full.h);

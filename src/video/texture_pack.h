@@ -44,8 +44,10 @@ public:
     // SELECT COURSE, R3DSceneBuilder::own_texture): the rows from top to
     // bottom (fractions of the height) of a PNG, turned upside down when flip
     // (a texture's first row in texture RAM may be the bottom of what it
-    // shows). Its slot, 0 when the file cannot be read
-    uint32_t own_picture(const std::string& file, float top, float bottom, bool flip);
+    // shows). over (optional): a PNG of the same size drawn over it first
+    // (alpha), left out when it cannot be read. Its slot, 0 when the file
+    // cannot be read
+    uint32_t own_picture(const std::string& file, float top, float bottom, bool flip, const std::string& over = {});
 
     // Replacements loaded since the last call, to be uploaded by the renderer
     std::vector<RgbaImage> take_new_images();

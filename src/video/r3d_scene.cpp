@@ -1439,7 +1439,8 @@ void R3DSceneBuilder::model(uint32_t addr, const Mat& m, const Attribs& a) {
                 if (own && textured) {
                     auto pic = own_textures_.find(tex);
                     if (pic != own_textures_.end())
-                        own_slot = own_pictures_->own_picture(pic->second.file, pic->second.top, pic->second.bottom, pic->second.flip);
+                        own_slot = own_pictures_->own_picture(pic->second.file, pic->second.top, pic->second.bottom, pic->second.flip,
+                                                               pic->second.over);
                     if (own_seen_.insert(tex).second)
                         printf("[r3d] own model %06x: texture %08x %s\n", start_addr & 0xFFFFFF, tex,
                                own_slot ? "-> own picture" : pic != own_textures_.end() ? "(own picture missing)" : "(the game's)");

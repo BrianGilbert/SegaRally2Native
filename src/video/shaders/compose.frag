@@ -343,8 +343,11 @@ void main() {
         float shift = pc.hud.x;
         float row = q.y * 384.0;
         // Where the foreground's replacement pictures are looked up (2D pixels):
-        // moved with the HUD like the foreground itself (-1: none there)
-        vec2 pic_pos = vec2((p.x - pc.layer2d.x) / pc.layer2d.y * 496.0, p.y * 384.0);
+        // moved with the HUD like the foreground itself (-1: none there).
+        // Beside the 4:3 area the outermost column is repeated, as for the
+        // foreground: a picture over the whole screen (FOREST's START!!) fills
+        // the sides like the game's own screens instead of leaving them black
+        vec2 pic_pos = vec2(q.x * 496.0, p.y * 384.0);
         if (shift > 0.0) {
             // The race HUD to the corners: on top the times (left)
             // and the position / stage top 3 (right), the time left and the
