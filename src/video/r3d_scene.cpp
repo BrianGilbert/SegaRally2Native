@@ -178,6 +178,28 @@ void R3DSceneBuilder::build(const R3DFrameState& state, R3DScene& out) {
     auto t3 = clock::now();
     if (pack_ && texture_ram_ && pack_->active()) apply_texture_pack(out);
     auto t4 = clock::now();
+    // Each viewport's lens in the frame before (the same state built twice
+    // keeps the one before it), by its node; one that jumped (a cut) is not
+    // blended (R3DScene::proj_at)
+    if (out.frame != lens_last_frame_ || lens_last_.empty()) {
+        lens_prev_.swap(lens_last_);
+        lens_prev_frame_ = lens_last_frame_;
+    }
+    lens_last_.clear();
+    lens_last_frame_ = out.frame;
+    for (R3DViewport& v : out.viewports) {
+        std::array<float, 4> now = {v.proj[0], v.proj[5], v.proj[8], v.proj[9]};
+        lens_last_[v.node] = now;
+        auto it = lens_prev_.find(v.node);
+        if (it == lens_prev_.end() || lens_prev_frame_ == ~0ull || out.frame <= lens_prev_frame_ || out.frame - lens_prev_frame_ > 4) continue;
+        const std::array<float, 4>& was = it->second;
+        bool cut = false;
+        for (int k = 0; k < 2; k++) cut = cut || was[k] == 0 || std::fabs(now[k] / was[k] - 1.0f) > 0.15f;
+        for (int k = 2; k < 4; k++) cut = cut || std::fabs(now[k] - was[k]) > 0.1f;
+        if (cut) continue;
+        v.has_prev_lens = true;
+        for (int k = 0; k < 4; k++) v.prev_lens[k] = was[k];
+    }
     link_previous(out);
     static const bool no_smooth = getenv("SR2_NO_SMOOTH") != nullptr, no_sync = getenv("SR2_NO_SYNC") != nullptr;
     auto t4b = clock::now();
@@ -1507,4 +1529,15 @@ void R3DSceneBuilder::model(uint32_t addr, const Mat& m, const Attribs& a) {
         in.back[0] = back_from, in.back[1] = uint32_t(backs_.size());
         instances_.push_back(in);
     }
+}
+
+void R3DScene::proj_at(size_t vi, float t, float out[16]) const {
+    static const bool now_only = getenv("SR2_PROJ_NOW") && atoi(getenv("SR2_PROJ_NOW")) == 1;
+    if (vi >= viewports.size()) return;
+    const R3DViewport& v = viewports[vi];
+    memcpy(out, v.proj, 64);
+    if (now_only || t == 1.0f || !v.has_prev_lens) return;
+    t = std::clamp(t, -1.0f, 1.0f);
+    static const int at[4] = {0, 5, 8, 9};
+    for (int k = 0; k < 4; k++) out[at[k]] = v.prev_lens[k] + (v.proj[at[k]] - v.prev_lens[k]) * t;
 }
