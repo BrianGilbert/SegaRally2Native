@@ -220,6 +220,9 @@ private:
     // Interpolation: every vertex gets a key (scene path + model instance +
     // polygon + corner) to find where it was in the previous frame
     std::vector<uint64_t> keys_, opaque_keys_, trans_keys_;
+    // ... and every back face's corner (R3DScene::backs), the same keys: a
+    // polygon that turns towards the camera, or away, is still followed
+    std::vector<uint64_t> back_keys_, backs_keys_;
     // Polygon key (corner bits clear) -> its first vertex: an open-addressing
     // table kept from frame to frame (from Lost World)
     struct KeyIndex {
