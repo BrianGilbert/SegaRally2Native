@@ -92,6 +92,7 @@ void R3DSceneBuilder::build(const R3DFrameState& state, R3DScene& out) {
     rd_.reset(state);
     out_ = &out;
     keys_.clear();
+    back_keys_.clear();
     instance_count_.clear();
     node_key_ = 0;
     out.vertices.clear();
@@ -840,6 +841,17 @@ void R3DSceneBuilder::pair_copies(const R3DScene& out) {
             }
             if (found) k = uint64_t(to) << 32 | (k & 0xFFFFFFFFull);
         }
+        have = false;
+        for (uint64_t& k : back_keys_) {
+            uint32_t hi = uint32_t(k >> 32);
+            if (!have || hi != last) {
+                auto it = rekey.find(hi);
+                found = it != rekey.end();
+                if (found) to = it->second;
+                last = hi, have = true;
+            }
+            if (found) k = uint64_t(to) << 32 | (k & 0xFFFFFFFFull);
+        }
     }
     prev_instances_.clear();
     for (const auto& list : viewport_instances_)
@@ -897,7 +909,29 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
     // with 40000 polygons), in an open-addressing table kept from frame to
     // frame (Lost World's: a new std::unordered_map each frame was most of
     // the preparation's time)
-    index_.reset(out.vertices.size() / 3 + 16);
+    index_.reset((out.vertices.size() + out.backs.size()) / 3 + 16);
+    // A polygon facing the camera whose partner last frame faced away (a back
+    // face, below) is followed only if it is scenery standing still: not a
+    // car or a person, and where the camera's move puts it within 30 cm.
+    // Everything else links as it always has
+    const R3DViewport* still_vp = nullptr;
+    for (const R3DViewport& v : out.viewports)
+        if (v.world) still_vp = &v;
+    bool still_ok = still_vp && prev_world_valid_;
+    if (still_ok) {
+        const float *ax = still_vp->world_axes, *pax = prev_world_axes_;
+        float d[3] = {still_vp->camera[0] - prev_world_camera_[0], still_vp->camera[1] - prev_world_camera_[1], still_vp->camera[2] - prev_world_camera_[2]};
+        float a = ax[6] * pax[6] + ax[7] * pax[7] + ax[8] * pax[8], b = ax[3] * pax[3] + ax[4] * pax[4] + ax[5] * pax[5];
+        still_ok = d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= 10.0f * 10.0f && a >= 0.9f && b >= 0.9f;
+    }
+    auto stands_still = [&](const R3DVertex& v, const float* p) {
+        if (!still_ok || (v.flags & (R3D_ACTOR | R3D_CAR))) return false;
+        const float *ax = still_vp->world_axes, *cam = still_vp->camera, *pax = prev_world_axes_, *pcam = prev_world_camera_;
+        float w[3], e[3];
+        for (int k = 0; k < 3; k++) w[k] = cam[k] + ax[k * 3] * v.pos[0] + ax[k * 3 + 1] * v.pos[1] + ax[k * 3 + 2] * v.pos[2] - pcam[k];
+        for (int k = 0; k < 3; k++) e[k] = w[0] * pax[k] + w[1] * pax[3 + k] + w[2] * pax[6 + k] - p[k];
+        return e[0] * e[0] + e[1] * e[1] + e[2] * e[2] <= 0.3f * 0.3f;
+    };
     uint32_t last_hi = 0;
     bool last_spin = false, have_hi = false;
     const float* spin_move = nullptr;
@@ -925,6 +959,7 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
         size_t j = size_t(was) + corner;
         if (j >= prev_positions_.size() || j >= prev_keys_.size() || prev_keys_[j] != key) continue;
         const float* p = prev_positions_[j].data();
+        if (j >= prev_front_count_ && !stands_still(v, p)) continue;
         float dx = p[0] - v.pos[0], dy = p[1] - v.pos[1], dz = p[2] - v.pos[2];
         float limit = 0.25f * std::max(1.0f, std::fabs(v.pos[2]));
         if (dx * dx + dy * dy + dz * dz > limit * limit) continue;
@@ -1052,6 +1087,109 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
             }
         }
     }
+    // The world's back faces (R3DScene::backs: left out of the picture by the
+    // back-face test, but the sun's rays still meet them, r3d_raytrace.cpp).
+    // A corner shared with a polygon facing the camera moves exactly as that
+    // one's does: moved on their own, the edges between both opened by a few
+    // centimetres between frames, and the sun shone through the seams (white
+    // lines that flickered between the chunks of a cliff's shadow). The other
+    // corners of the scenery, which stands still, go where the camera's move
+    // puts them last frame; those of cars and people keep this frame's place.
+    // But first each corner is followed from last frame by its key, as the
+    // polygons facing the camera are, whichever way it faced then: the
+    // camera's move is an estimate a few centimetres off, and a polygon that
+    // had just turned towards the camera was not followed at all (left
+    // where this frame has it, a frame's move ahead of its neighbours while
+    // the camera turned: the sun shone through the gap, white lines that
+    // flickered in the shadows, only with Smooth). SR2_BACK_LINKS=0: as before
+    static const bool back_links = !(getenv("SR2_BACK_LINKS") && atoi(getenv("SR2_BACK_LINKS")) == 0);
+    const size_t vcount = out.vertices.size();
+    std::vector<uint8_t> back_linked(out.backs.size(), 0);
+    for (size_t i = 0; i < out.backs.size(); i++) {
+        R3DVertex& v = out.backs[i];
+        memcpy(v.prev, v.pos, sizeof(v.prev));
+        if (!back_links || i >= back_keys_.size()) continue;
+        uint64_t key = back_keys_[i], poly = key & ~7ull;
+        uint32_t corner = uint32_t(key & 7);
+        if (corner == 0) index_.insert(poly, uint32_t(vcount + i));
+        auto spin = spinning.find(uint32_t(key >> 32));
+        if (spin != spinning.end()) {
+            for (int k = 0; k < 3; k++) v.prev[k] = v.pos[k] - spin->second[k];
+            back_linked[i] = 1;
+            continue;
+        }
+        uint32_t was = prev_index_.find(poly);
+        if (was == KeyIndex::EMPTY) continue;
+        size_t j = size_t(was) + corner;
+        if (j >= prev_positions_.size() || j >= prev_keys_.size() || prev_keys_[j] != key) continue;
+        const float* p = prev_positions_[j].data();
+        float dx = p[0] - v.pos[0], dy = p[1] - v.pos[1], dz = p[2] - v.pos[2];
+        float limit = 0.25f * std::max(1.0f, std::fabs(v.pos[2]));
+        if (dx * dx + dy * dy + dz * dz > limit * limit) continue;
+        memcpy(v.prev, p, sizeof(v.prev));
+        back_linked[i] = 1;
+    }
+    if (wv && prev_world_valid_) {
+        const float *ax = wv->world_axes, *cam = wv->camera, *pax = prev_world_axes_, *pcam = prev_world_camera_;
+        auto dot3 = [](const float* p, const float* q) { return p[0] * q[0] + p[1] * q[1] + p[2] * q[2]; };
+        float d[3] = {cam[0] - pcam[0], cam[1] - pcam[1], cam[2] - pcam[2]};
+        bool cut = dot3(d, d) > 10.0f * 10.0f || dot3(ax + 6, pax + 6) < 0.9f || dot3(ax + 3, pax + 3) < 0.9f;
+        size_t end = std::min<size_t>(size_t(wv->back_first) + wv->back_count, out.backs.size());
+        if (!cut && end > wv->back_first) {
+            auto bits = [](const float* p) {
+                uint32_t b[3];
+                memcpy(b, p, 12);
+                return (uint64_t(b[0]) * 0x9E3779B97F4A7C15ull) ^ (uint64_t(b[1]) * 0xC2B2AE3D27D4EB4Full) ^ (uint64_t(b[2]) * 0x165667B19E3779F9ull);
+            };
+            // (and a corner a hair from one facing the camera, of another
+            // model beside it, takes that one's move: on a 5 cm grid)
+            constexpr float CELL = 0.05f;
+            auto cell = [](int64_t x, int64_t y, int64_t z) {
+                return (uint64_t(x) * 0x9E3779B97F4A7C15ull) ^ (uint64_t(y) * 0xC2B2AE3D27D4EB4Full) ^ (uint64_t(z) * 0x165667B19E3779F9ull);
+            };
+            std::unordered_map<uint64_t, uint32_t> front;   // a corner's position -> a vertex facing the camera there
+            std::unordered_map<uint64_t, uint32_t> near_front;   // a grid cell -> one there
+            front.reserve(size_t(wv->opaque_count) + wv->trans_count);
+            near_front.reserve(size_t(wv->opaque_count) + wv->trans_count);
+            for (auto [first, count] : {std::pair{wv->opaque_first, wv->opaque_count}, std::pair{wv->trans_first, wv->trans_count}})
+                for (uint32_t i = first; i < first + count && i < out.vertices.size(); i++) {
+                    const float* q = out.vertices[i].pos;
+                    front.emplace(bits(q), i);
+                    if (out.vertices[i].flags & (R3D_ACTOR | R3D_CAR)) continue;
+                    near_front.emplace(cell(int64_t(std::floor(q[0] / CELL)), int64_t(std::floor(q[1] / CELL)), int64_t(std::floor(q[2] / CELL))), i);
+                }
+            for (size_t i = wv->back_first; i < end; i++) {
+                R3DVertex& v = out.backs[i];
+                if (back_linked[i]) continue;
+                auto f = front.find(bits(v.pos));
+                if (f != front.end() && memcmp(out.vertices[f->second].pos, v.pos, 12) == 0) {
+                    memcpy(v.prev, out.vertices[f->second].prev, sizeof(v.prev));
+                    continue;
+                }
+                if (v.flags & (R3D_ACTOR | R3D_CAR)) continue;
+                int64_t c[3] = {int64_t(std::floor(v.pos[0] / CELL)), int64_t(std::floor(v.pos[1] / CELL)), int64_t(std::floor(v.pos[2] / CELL))};
+                const R3DVertex* best = nullptr;
+                float best_d = CELL * CELL;
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dz = -1; dz <= 1; dz++) {
+                            auto n = near_front.find(cell(c[0] + dx, c[1] + dy, c[2] + dz));
+                            if (n == near_front.end()) continue;
+                            const R3DVertex& o = out.vertices[n->second];
+                            float e[3] = {o.pos[0] - v.pos[0], o.pos[1] - v.pos[1], o.pos[2] - v.pos[2]};
+                            float d = dot3(e, e);
+                            if (d < best_d) best_d = d, best = &o;
+                        }
+                if (best) {
+                    for (int k = 0; k < 3; k++) v.prev[k] = v.pos[k] - (best->pos[k] - best->prev[k]);
+                    continue;
+                }
+                float w[3];
+                for (int k = 0; k < 3; k++) w[k] = cam[k] + dot3(ax + k * 3, v.pos) - pcam[k];
+                for (int k = 0; k < 3; k++) v.prev[k] = w[0] * pax[k] + w[1] * pax[3 + k] + w[2] * pax[6 + k];
+            }
+        }
+    }
     prev_world_valid_ = wv != nullptr;
     if (wv) {
         memcpy(prev_world_axes_, wv->world_axes, sizeof(prev_world_axes_));
@@ -1060,9 +1198,14 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
     std::swap(prev_index_, index_);
     // Only the positions are kept (a copy of every whole vertex was most of
     // the rest); the vectors keep their room
-    prev_positions_.resize(out.vertices.size());
+    prev_positions_.resize(out.vertices.size() + out.backs.size());
     for (size_t i = 0; i < out.vertices.size(); i++) memcpy(prev_positions_[i].data(), out.vertices[i].pos, 12);
+    for (size_t i = 0; i < out.backs.size(); i++) memcpy(prev_positions_[out.vertices.size() + i].data(), out.backs[i].pos, 12);
     prev_keys_.assign(keys_.begin(), keys_.end());
+    prev_keys_.resize(out.vertices.size(), 0);
+    if (back_links) prev_keys_.insert(prev_keys_.end(), back_keys_.begin(), back_keys_.end());
+    prev_keys_.resize(prev_positions_.size(), 0);
+    prev_front_count_ = out.vertices.size();
 }
 
 void R3DSceneBuilder::KeyIndex::reset(size_t count) {
@@ -1214,6 +1357,7 @@ void R3DSceneBuilder::viewport(uint32_t addr, int depth) {
         opaque_keys_.clear();
         trans_keys_.clear();
         backs_.clear();
+        backs_keys_.clear();
         viewport_key_ = addr;
         instances_.clear();
         node_ptr(vp(0x02), base, Attribs{}, 0);
@@ -1233,6 +1377,7 @@ void R3DSceneBuilder::viewport(uint32_t addr, int depth) {
         v.back_first = uint32_t(out_->backs.size());
         v.back_count = uint32_t(backs_.size());
         out_->backs.insert(out_->backs.end(), backs_.begin(), backs_.end());
+        back_keys_.insert(back_keys_.end(), backs_keys_.begin(), backs_keys_.end());
         out_->viewports.push_back(v);
     }
 
@@ -1342,16 +1487,24 @@ void R3DSceneBuilder::node(uint32_t addr, const Mat& parent, Attribs a, int dept
         else if (fade < 1.0f / 32.0f) fade = 0;
         float parent_alpha = a.alpha;
         bool models = child & 0x01000000;
-        auto visit = [&](uint32_t e, float alpha) {
+        auto visit = [&](uint32_t e, float alpha, float shadow) {
             Attribs b = a;
             b.alpha = alpha;
+            b.shadow = a.shadow * shadow;
             if (models) model(e & 0xFFFFFF, m, b);
             else node(e & 0xFFFFFF, m, b, depth + 1);
         };
-        if (fade > 0) visit(entry[k], parent_alpha * fade);
-        if (fade < 1 && k != 3) visit(entry[k + 1], parent_alpha * (1 - fade));
+        // (cross-fading with the next model: the one more on screen casts the
+        // whole shadow; the last one, alone, fading out at the far end: as much as it is drawn)
+        bool partner = fade < 1 && k != 3;
+        if (fade > 0) visit(entry[k], parent_alpha * fade, partner ? (fade >= 0.5f ? 1.0f : 0.0f) : fade);
+        if (partner) visit(entry[k + 1], parent_alpha * (1 - fade), fade >= 0.5f ? 0.0f : 1.0f);
     } else {
-        if (!no_lod && !a.no_cull) a.alpha *= std::clamp(fac[3] * (lod_scale - del[3]), 0.0f, 1.0f);
+        if (!no_lod && !a.no_cull) {
+            float fade = std::clamp(fac[3] * (lod_scale - del[3]), 0.0f, 1.0f);
+            a.alpha *= fade;
+            a.shadow *= fade;
+        }
         node_ptr(child, m, a, depth + 1);
     }
 }
@@ -1464,6 +1617,13 @@ void R3DSceneBuilder::model(uint32_t addr, const Mat& m, const Attribs& a) {
                 flags |= ((h[6] >> 5) & 3) << R3D_SHININESS_SHIFT;
                 if (((h[6] >> 24) & 0x7F) == 2) flags |= R3D_INVERT_RGB;
                 if (h[4] & 0x80) flags |= R3D_TRANSLATOR;
+                // Translucent only because the LOD fades it: still a caster of
+                // traced sun shadows (r3d_raytrace.cpp), as solid as a.shadow.
+                // (As it was, the shadow came all at once as the model finished
+                // fading in, some 100 m away: on the mountain the trees' and
+                // rocks' shadows popped in)
+                if (a.alpha < 1.0f && !poly_alpha && a.shadow > 0)
+                    flags |= R3D_LOD_FADE | uint32_t(std::lround(std::clamp(a.shadow, 0.0f, 1.0f) * 63.0f)) << R3D_LOD_SHADOW_SHIFT;
                 uint32_t own_slot = 0;
                 if (own && textured) {
                     auto pic = own_textures_.find(tex);
@@ -1526,6 +1686,7 @@ void R3DSceneBuilder::model(uint32_t addr, const Mat& m, const Attribs& a) {
                     if (!translucent) {
                         backs_.insert(backs_.end(), out, out + 3);
                         if (nverts == 4) backs_.insert(backs_.end(), {out[0], out[2], out[3]});
+                        for (int c = 0; c < (nverts == 4 ? 6 : 3); c++) backs_keys_.push_back(poly_key | uint64_t(c));
                     }
                 } else {
                     for (int i = 0; i < nverts; i++)

@@ -286,6 +286,7 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
                     aligned[over[k].second] = int(i);
                     for (uint32_t q = in.opaque[0]; q < in.opaque[1]; q++) out.vertices[v.opaque_first + q].flags |= R3D_ACTOR;
                     for (uint32_t q = in.trans[0]; q < in.trans[1]; q++) out.vertices[v.trans_first + q].flags |= R3D_ACTOR;
+                    for (uint32_t q = in.back[0]; q < in.back[1] && v.back_first + q < out.backs.size(); q++) out.backs[v.back_first + q].flags |= R3D_ACTOR;
                 }
             a = b;
         }
@@ -451,6 +452,7 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
         if (aligned[n] < 0 && r3d_same_axes(in.axes, axes)) {   // (held: a car's turned the scenery's way)
             for (uint32_t k = in.opaque[0]; k < in.opaque[1]; k++) out.vertices[v.opaque_first + k].flags |= R3D_ACTOR;
             for (uint32_t k = in.trans[0]; k < in.trans[1]; k++) out.vertices[v.trans_first + k].flags |= R3D_ACTOR;
+            for (uint32_t k = in.back[0]; k < in.back[1] && v.back_first + k < out.backs.size(); k++) out.backs[v.back_first + k].flags |= R3D_ACTOR;
         }
     }
     // What rides in a car goes down with it, by exactly as much: the drivers'
@@ -523,6 +525,7 @@ static void settle_cars(const std::vector<R3DInstance>& list, const float* axes,
         if (scenery_way) {   // (a car's: not ground, lit and shadowed as a car)
             for (uint32_t k = in.opaque[0]; k < in.opaque[1]; k++) out.vertices[v.opaque_first + k].flags |= R3D_ACTOR;
             for (uint32_t k = in.trans[0]; k < in.trans[1]; k++) out.vertices[v.trans_first + k].flags |= R3D_ACTOR;
+            for (uint32_t k = in.back[0]; k < in.back[1] && v.back_first + k < out.backs.size(); k++) out.backs[v.back_first + k].flags |= R3D_ACTOR;
         }
     }
     for (size_t n = 0; n < list.size(); n++) {
@@ -937,6 +940,7 @@ void R3DWorldTracker::track(const std::vector<std::vector<R3DInstance>>& viewpor
         if (r3d_same_axes(in.axes, axes)) continue;
         for (uint32_t i = in.opaque[0]; i < in.opaque[1]; i++) out.vertices[v.opaque_first + i].flags |= R3D_ACTOR;
         for (uint32_t i = in.trans[0]; i < in.trans[1]; i++) out.vertices[v.trans_first + i].flags |= R3D_ACTOR;
+        for (uint32_t i = in.back[0]; i < in.back[1] && v.back_first + i < out.backs.size(); i++) out.backs[v.back_first + i].flags |= R3D_ACTOR;
     }
     settle_actors(viewport_instances[best], axes, out, v);
     settle_ground_marks(viewport_instances[best], axes, out, v);

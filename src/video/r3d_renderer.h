@@ -242,6 +242,7 @@ private:
     float shadow_matrix_[16] = {};     // view space -> shadow map, this frame
     float shadow_up_[3] = {}, shadow_height_ = 0;   // world up in view space, camera height above the ground
     bool shadow_frame_ = false;        // the shadow map is drawn this frame
+    size_t backs_uploaded_ = 0;       // the world's back faces after the scene's vertices (shadowmap_backs)
     VkPipeline shadow_ = VK_NULL_HANDLE;
     R3DRayTracer rt_;
     int ray_tracing_ = 2;
