@@ -913,8 +913,8 @@ int main(int argc, char** argv) {
         layers_shown = &l;
     };
 
-    // Preparation thread: while interpolating, each new game frame is made
-    // ready as soon as the game finishes it, its 3D scene and its 2D layers
+    // Preparation thread: each new game frame is made ready (with either
+    // MOTION setting; not for replays and --shot) as soon as the game finishes it, its 3D scene and its 2D layers
     // side by side, so this thread only draws and keeps up with every
     // refresh (the two took ~14 ms here, more than a refresh at 120 Hz, and
     // the images went out unevenly). The interpolation delay follows when
@@ -1585,8 +1585,17 @@ int main(int argc, char** argv) {
         // SR2_ATTRACT_SMOOTH=1: smooth there too (to compare)
         static const bool attract_smooth = getenv("SR2_ATTRACT_SMOOTH") && atoi(getenv("SR2_ATTRACT_SMOOTH")) == 1;
         bool interpolating = g_opt.interp && g_opt.replay.empty() && !g_opt.shot_frame && (attract_smooth || !g_in_attract);
-        if (interpolating != prep_on) {   // a frame it made earlier is not one to go back to
-            prep_on = interpolating;
+        // MOTION ORIGINAL too: each new game frame is made ready on the
+        // preparation thread as soon as the game has it, and shown once it is.
+        // Made here, its 3D scene (5-7 ms at the Mountain's start, peaks of
+        // 12-20) came on top of this image's own work, and at 120 Hz the image
+        // that took a new frame missed its refresh: 85-110 images a second
+        // instead of 120 by the castle. Replays and --shot still build here
+        // (the same frame every time). SR2_BUILD_HERE=1: as before (to compare)
+        static const bool build_here = getenv("SR2_BUILD_HERE") && atoi(getenv("SR2_BUILD_HERE")) == 1;
+        bool prepared = interpolating || (!build_here && g_opt.replay.empty() && !g_opt.shot_frame);
+        if (prepared != prep_on) {   // a frame it made earlier is not one to go back to
+            prep_on = prepared;
             std::lock_guard<std::mutex> lock(ready_mutex);
             ready_queue.clear();
         }
@@ -1594,7 +1603,7 @@ int main(int argc, char** argv) {
         std::shared_ptr<const R3DFrameState> latest;
         std::shared_ptr<Prepared> ready;                  // the newest one made ready
         std::vector<std::shared_ptr<Prepared>> waiting;   // those not taken yet, oldest first
-        if (interpolating) {
+        if (prepared) {
             std::lock_guard<std::mutex> lock(ready_mutex);
             // (the newest stays, taken or not: the timing follows it)
             while (ready_queue.size() > 1 && ready_queue.front()->serial <= taken_serial) ready_queue.pop_front();
@@ -1656,8 +1665,10 @@ int main(int argc, char** argv) {
                     if (w->state->time >= shown_time) break;
                 }
             }
+        } else if (prepared && !interpolating && ready && ready->serial > taken_serial) {
+            next_ready = ready;   // without interpolation, the newest at once
         }
-        std::shared_ptr<const R3DFrameState> next_state = interpolating ? (next_ready ? next_ready->state : nullptr) : latest;
+        std::shared_ptr<const R3DFrameState> next_state = prepared ? (next_ready ? next_ready->state : nullptr) : latest;
         bool take = next_state && next_state != built;
         // The 2D layers of each vblank are kept in a few copies: while the 3D
         // frames are interpolated, those of the 3D frame drawn are shown (the
@@ -1669,7 +1680,7 @@ int main(int argc, char** argv) {
             poll_snapshots();
             newest_2d = snaps[newest_snap].frame;
         }
-        bool follow = interpolating && latest && newest_2d != ~0ull && newest_2d <= latest->vblank + 4;
+        bool follow = prepared && latest && newest_2d != ~0ull && newest_2d <= latest->vblank + 4;
         double scene_from = qpc_seconds(), scene_seconds = 0;   // 2D composition and 3D scene build here (CPU)
         const uint64_t shown_before = shown;
         // (shown = ~0: composed again here, as after a change of settings in the pause menu)
