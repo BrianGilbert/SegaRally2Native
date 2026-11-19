@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -384,7 +385,20 @@ bool VkPresenter::init(const char* title, int width, int height, bool with_ngx) 
             found += !strcmp(a.extensionName, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) ||
                      !strcmp(a.extensionName, VK_KHR_RAY_QUERY_EXTENSION_NAME) ||
                      !strcmp(a.extensionName, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-        if (found == 3) {
+        // NVIDIA before Ampere (RTX 30) is left out: the GTX 10 and 16 cards
+        // have no RT cores, yet their driver may offer ray queries traced on
+        // the shaders, far too slow for this (GitHub issue #142: a GTX 1080 at
+        // 15-20 fps), and the RTX 20's were a first try. By PCI id: Ampere
+        // starts at 0x2200 (the GA100 below it, 0x20B0-0x20FF, has no RT cores).
+        // SR2_RT_ANY_GPU=1: offered on any GPU whose driver has ray queries
+        VkPhysicalDeviceProperties p;
+        vkGetPhysicalDeviceProperties(gpu_, &p);
+        static const bool any_gpu = getenv("SR2_RT_ANY_GPU") && atoi(getenv("SR2_RT_ANY_GPU")) != 0;
+        bool before_ampere = p.vendorID == 0x10DE && p.deviceID < 0x2200;
+        if (found == 3 && before_ampere && !any_gpu)
+            printf("[vulkan] ray tracing left off: %s is older than an RTX 30 (SR2_RT_ANY_GPU=1 to try it)\n",
+                   p.deviceName);
+        if (found == 3 && (!before_ampere || any_gpu)) {
             VkPhysicalDeviceVulkan12Features have{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
             frq.pNext = &have;
             fas.pNext = &frq;
