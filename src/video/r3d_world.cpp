@@ -126,6 +126,15 @@ static void ground_under(const std::vector<R3DInstance>& list, const float* axes
     std::vector<std::pair<uint64_t, int>> cells;
     for (size_t m = 0; m < queries.size(); m++) cells.push_back({cell_of(queries[m].u, queries[m].w), int(m)});
     std::sort(cells.begin(), cells.end());
+    if (queries.empty()) return;
+    // The cells the points are in span this much: the rest of a big triangle
+    // has no point to look at (walked cell by cell, the big ground triangles
+    // were most of the time of settle_actors at the Mountain's start)
+    float qu0 = 1e30f, qu1 = -1e30f, qw0 = 1e30f, qw1 = -1e30f;
+    for (const GroundQuery& m : queries) {
+        float cu = std::floor(m.u / cell) * cell, cw = std::floor(m.w / cell) * cell;
+        qu0 = std::min(qu0, cu), qu1 = std::max(qu1, cu + cell), qw0 = std::min(qw0, cw), qw1 = std::max(qw1, cw + cell);
+    }
     for (const R3DInstance& in : list) {
         if (!r3d_same_axes(in.axes, axes)) continue;
         for (uint32_t i = in.opaque[0]; i + 2 < in.opaque[1]; i += 3) {
@@ -136,8 +145,9 @@ static void ground_under(const std::vector<R3DInstance>& list, const float* axes
             float u0 = std::min({u[0], u[1], u[2]}), u1 = std::max({u[0], u[1], u[2]});
             float w0 = std::min({w[0], w[1], w[2]}), w1 = std::max({w[0], w[1], w[2]});
             if (u1 - u0 > 60.0f || w1 - w0 > 60.0f) continue;   // (huge ones: none is ground near a model)
-            for (float cu = std::floor(u0 / cell) * cell; cu <= u1; cu += cell)
-                for (float cw = std::floor(w0 / cell) * cell; cw <= w1; cw += cell) {
+            if (u1 < qu0 || u0 > qu1 || w1 < qw0 || w0 > qw1) continue;
+            for (float cu = std::floor(std::max(u0, qu0) / cell) * cell; cu <= std::min(u1, qu1); cu += cell)
+                for (float cw = std::floor(std::max(w0, qw0) / cell) * cell; cw <= std::min(w1, qw1); cw += cell) {
                     uint64_t key = cell_of(cu + 0.5f * cell, cw + 0.5f * cell);
                     auto it = std::lower_bound(cells.begin(), cells.end(), std::make_pair(key, -1));
                     for (; it != cells.end() && it->first == key; ++it) {
