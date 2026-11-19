@@ -184,7 +184,7 @@ void pad_rumble_frame(float arcade, bool attract) {
         {0.00f, 0.03f, 0.1f}, {0.00f, 0.03f, 0.1f},   // smooth
         {0.75f, 0.55f, 0.9f}, {0.75f, 0.55f, 0.9f},   // roughest (mud, off the road)
         {0.05f, 0.12f, 0.4f}, {0.05f, 0.12f, 0.4f},   // hard
-        {0.45f, 0.20f, 0.5f}, {0.45f, 0.20f, 0.5f},   // snow: soft and heavy
+        {0.45f, 0.40f, 0.7f}, {0.45f, 0.40f, 0.7f},   // snow: heavy, with a crunch
         {0.55f, 0.65f, 0.8f}, {0.55f, 0.65f, 0.8f},   // gravel (the other set)
         {0, 0, 0}, {0, 0, 0}};
     const uint32_t ground_bits = rd16(car + 0x46);
