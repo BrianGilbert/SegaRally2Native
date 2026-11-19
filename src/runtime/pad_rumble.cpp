@@ -118,13 +118,14 @@ void pad_rumble_frame(float arcade, bool attract) {
             // the last 6 frames (0.1 s) than grip and brakes can: a wall, a
             // tree, another car, a rock; or a hard landing. Over 6 frames, as
             // the game's velocity jitters from frame to frame (in fast bends
-            // one frame alone read 2-4 G). Driving changes it by at most
-            // ~1.2 m/s in 0.1 s
+            // one frame alone read 2-4 G). In Sergi's Mountain laps driving
+            // changed it by up to ~8 m/s in 0.1 s (p99: hard braking, tight
+            // bends); the fence hits by 28-33
             const int old = (s.frames + 2) & 7;   // 6 frames ago
             const float dx = vx - s.hvx[old], dz = vz - s.hvz[old];
             dv6 = s.frames >= 8 ? std::sqrt(dx * dx + dz * dz) : 0.0f;
             const float land = std::max(0.0f, vy - s.vy) * HZ / G;   // pushed up
-            hit_now = std::clamp(std::max((dv6 - 2.0f) / 5.0f, (land - 6.0f) / 8.0f), 0.0f, 1.0f);
+            hit_now = std::clamp(std::max((dv6 - 8.0f) / 10.0f, (land - 6.0f) / 8.0f), 0.0f, 1.0f);
         }
         s.vy = vy;
         memcpy(s.dang, dang, sizeof dang);
