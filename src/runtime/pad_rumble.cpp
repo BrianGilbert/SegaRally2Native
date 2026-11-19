@@ -75,6 +75,7 @@ struct State {
     int16_t ang[3] = {};
     int16_t dang[3] = {};
     float rough = 0, hit = 0;
+    float hvx[8] = {}, hvz[8] = {};   // the last frames' velocity (m/s), for the hits
 };
 State s;
 
@@ -99,7 +100,7 @@ void pad_rumble_frame(float arcade, bool attract) {
     int16_t ang[3];
     for (int i = 0; i < 3; i++) ang[i] = int16_t(rd16(car + 0x18 + 2 * i));
 
-    float rough_now = 0, hit_now = 0;
+    float rough_now = 0, hit_now = 0, dv6 = 0;
     float raw_y = 0, raw_p = 0, raw_r = 0;   // (for the log)
     if (s.have) {
         const float vy = (y - s.y) * HZ;
@@ -113,15 +114,17 @@ void pad_rumble_frame(float arcade, bool attract) {
             const float jolt_r = std::fabs(float(int16_t(dang[2] - s.dang[2]))) * ANGLE * 57.3f;
             raw_y = jolt_y, raw_p = jolt_p, raw_r = jolt_r;
             rough_now = std::min(1.0f, jolt_y / 0.6f + (jolt_p + jolt_r) / 0.8f);
-            // A hit: the car losing speed far faster than the brakes can (a
-            // wall, a tree, another car: over 2.5 G in a frame) or a hard
-            // landing. (Not the turning acceleration: in fast bends it reached
-            // 2 G and read as hits all the time; small bumps of the body at
-            // the edges of the ground types neither)
-            const float was_v = std::sqrt(s.vx * s.vx + s.vz * s.vz), now_v = std::sqrt(vx * vx + vz * vz);
-            const float lost = (was_v - now_v) * HZ / G;
+            // A hit: the velocity changing (speed or direction) far more over
+            // the last 6 frames (0.1 s) than grip and brakes can: a wall, a
+            // tree, another car, a rock; or a hard landing. Over 6 frames, as
+            // the game's velocity jitters from frame to frame (in fast bends
+            // one frame alone read 2-4 G). Driving changes it by at most
+            // ~1.2 m/s in 0.1 s
+            const int old = (s.frames + 2) & 7;   // 6 frames ago
+            const float dx = vx - s.hvx[old], dz = vz - s.hvz[old];
+            dv6 = s.frames >= 8 ? std::sqrt(dx * dx + dz * dz) : 0.0f;
             const float land = std::max(0.0f, vy - s.vy) * HZ / G;   // pushed up
-            hit_now = std::clamp(std::max((lost - 2.5f) / 4.0f, (land - 6.0f) / 8.0f), 0.0f, 1.0f);
+            hit_now = std::clamp(std::max((dv6 - 2.0f) / 5.0f, (land - 6.0f) / 8.0f), 0.0f, 1.0f);
         }
         s.vy = vy;
         memcpy(s.dang, dang, sizeof dang);
@@ -162,6 +165,7 @@ void pad_rumble_frame(float arcade, bool attract) {
     prev_speed = speed;
 
     s.y = y, s.vx = vx, s.vz = vz;
+    s.hvx[s.frames & 7] = vx, s.hvz[s.frames & 7] = vz;
     memcpy(s.ang, ang, sizeof ang);
     s.have = true;
     s.frames++;
@@ -238,6 +242,6 @@ void pad_rumble_frame(float arcade, bool attract) {
     bump(g_trigger_rumble[1], right);
 
     if (log)   // every race frame, with the raw jolts (to tune the thresholds)
-        printf("[rumble] ground %04X game %X%X%X%X slip %.2f/%.2f section %3u%s  speed %5.1f  y %6.3f  x %7.2f  z %7.2f  jolt y %.3f p %.3f r %.3f  rough %.2f  slide %.2f  hit %.2f  spin %.2f  arcade %.2f  -> pad %.2f/%.2f  triggers %.2f/%.2f\n",
-               ground_bits, rd32(0x1B0C7C), rd32(0x1B0C78), rd32(0x1B0C74), rd32(0x1B0C70), side_a, side_b, section, bridge ? " BRIDGE" : "", speed, y, rdf(car + 0x00), rdf(car + 0x08), raw_y, raw_p, raw_r, rough, slide, hit, spin, arcade, low, high, left, right);
+        printf("[rumble] ground %04X game %X%X%X%X slip %.2f/%.2f dv6 %.2f vx %.3f vz %.3f section %3u%s  speed %5.1f  y %6.3f  x %7.2f  z %7.2f  jolt y %.3f p %.3f r %.3f  rough %.2f  slide %.2f  hit %.2f  spin %.2f  arcade %.2f  -> pad %.2f/%.2f  triggers %.2f/%.2f\n",
+               ground_bits, rd32(0x1B0C7C), rd32(0x1B0C78), rd32(0x1B0C74), rd32(0x1B0C70), side_a, side_b, dv6, vx, vz, section, bridge ? " BRIDGE" : "", speed, y, rdf(car + 0x00), rdf(car + 0x08), raw_y, raw_p, raw_r, rough, slide, hit, spin, arcade, low, high, left, right);
 }
