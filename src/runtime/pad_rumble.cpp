@@ -132,6 +132,16 @@ void pad_rumble_frame(float arcade, bool attract) {
     }
     // Rough rises at once and lingers a few frames, so single jolts are felt
     s.rough = std::max(rough_now, s.rough * 0.75f);
+    // Landings: 0x22F394 is 1 while the player's car is in the air (the game
+    // then stops the rolling sound and counts the frames, and plays its
+    // landing thump on touching down, fn_0003D7F4). A thump as strong as the
+    // flight was long: a hop is small, a long jump the full kick
+    static int air = 0;
+    if (rd32(0x22F394) == 1) air++;
+    else {
+        if (air >= 6) hit_now = std::max(hit_now, std::clamp(float(air) / 40.0f, 0.3f, 1.0f));
+        air = 0;
+    }
     s.hit = std::max(hit_now, s.hit * 0.88f);
 
     // Slide: where the car points against where it goes
