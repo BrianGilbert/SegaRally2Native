@@ -13,6 +13,10 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[31] 19 November 2026
+- Performance improvements and optimizations, which should mean fewer dropped frames in demanding spots.
+- With Global Illumination on, the faint film of dots on the tarmac that moved with the car should be gone.
+
 [30] 19 November 2026
 - New OBJECT DISTANCE option (GRAPHICS > WORLD): spectators and roadside objects can now show up to 250 m away instead of 100 m.
 - Some sun shadows on the scenery should no longer pop in by chunks as you drive.
