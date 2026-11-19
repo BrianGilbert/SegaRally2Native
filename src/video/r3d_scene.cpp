@@ -358,6 +358,14 @@ void R3DSceneBuilder::settle_player_car(R3DScene& out) {
     if (gaps.size() >= 8) {
         std::nth_element(gaps.begin(), gaps.begin() + gaps.size() / 2, gaps.end());
         raw = patch_gap = gaps[gaps.size() / 2];
+        // FOREST (the patch raised below): by its lowest fifth, so a patch
+        // tilted against the road (landing from a jump) is clear of it all
+        // over; not where that is far under the middle (a bank beside the road)
+        if (forest_) {
+            std::nth_element(gaps.begin(), gaps.begin() + gaps.size() / 5, gaps.begin() + gaps.size() / 2);
+            float low = gaps[gaps.size() / 5];
+            if (raw - low <= 0.1f) patch_gap = low;
+        }
     } else if (count >= 90) {
         // No patch: the game lays none under the cars farther away (some 40 m
         // on), which hover all the same, and over a road drawn with less
@@ -459,8 +467,8 @@ void R3DSceneBuilder::settle_player_car(R3DScene& out) {
     // carlog: the middle 22 cm under the road), and as the car lands from a
     // jump the patch comes down to the road (0.4 cm over it for some 15
     // frames): under the road or on it, the shadow went out or flickered.
-    // There it is raised to 3 cm over the road (only on FOREST, the other
-    // courses as they were)
+    // There it is raised to 3 cm over the road, by its lowest fifth (patch_gap;
+    // only on FOREST, the other courses as they were)
     bool raise = forest_ && patch_gap < 0.03f && patch_gap > -0.5f;
     if (raise) patch_down = patch_gap;
     for (uint32_t k : patches) {
