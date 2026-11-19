@@ -98,6 +98,7 @@ void pad_rumble_frame(float arcade, bool attract) {
     for (int i = 0; i < 3; i++) ang[i] = int16_t(rd16(car + 0x18 + 2 * i));
 
     float rough_now = 0, hit_now = 0;
+    float raw_y = 0, raw_p = 0, raw_r = 0;   // (for the log)
     if (s.have) {
         const float vy = (y - s.y) * HZ;
         int16_t dang[3];
@@ -108,6 +109,7 @@ void pad_rumble_frame(float arcade, bool attract) {
             const float jolt_y = std::fabs(vy - s.vy);
             const float jolt_p = std::fabs(float(int16_t(dang[0] - s.dang[0]))) * ANGLE * 57.3f;
             const float jolt_r = std::fabs(float(int16_t(dang[2] - s.dang[2]))) * ANGLE * 57.3f;
+            raw_y = jolt_y, raw_p = jolt_p, raw_r = jolt_r;
             rough_now = std::min(1.0f, jolt_y / 0.6f + (jolt_p + jolt_r) / 0.8f);
             // A hit: the horizontal acceleration well past what grip gives
             // (about 1.5 G) or a landing (the vertical speed stopping hard)
@@ -178,7 +180,7 @@ void pad_rumble_frame(float arcade, bool attract) {
     bump(g_trigger_rumble[0], left);
     bump(g_trigger_rumble[1], right);
 
-    if (log && (low > 0.02f || left > 0.02f || right > 0.02f))
-        printf("[rumble] speed %5.1f  rough %.2f  slide %.2f  hit %.2f  spin %.2f  arcade %.2f  -> pad %.2f/%.2f  triggers %.2f/%.2f\n",
-               speed, rough, slide, hit, spin, arcade, low, high, left, right);
+    if (log)   // every race frame, with the raw jolts (to tune the thresholds)
+        printf("[rumble] speed %5.1f  y %6.3f  x %7.2f  z %7.2f  jolt y %.3f p %.3f r %.3f  rough %.2f  slide %.2f  hit %.2f  spin %.2f  arcade %.2f  -> pad %.2f/%.2f  triggers %.2f/%.2f\n",
+               speed, y, rdf(car + 0x00), rdf(car + 0x08), raw_y, raw_p, raw_r, rough, slide, hit, spin, arcade, low, high, left, right);
 }
