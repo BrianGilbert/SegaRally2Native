@@ -9,6 +9,7 @@
 
 #include "app_internal.h"
 #include "inputs.h"
+#include "pad_rumble.h"
 #include "runtime.h"
 #include "wheel.h"
 
@@ -168,10 +169,10 @@ bool poll_gamepads(HWND hwnd) {
             if (pad.view) in.view = true;
             if (pad.handbrake) in.handbrake = true;
             static const bool no_ffb = getenv("SR2_NO_FFB_RUMBLE") != nullptr;
-            if (!no_ffb) {   // the wheel's force feedback (runtime.cpp ffb_frame) as rumble
-                float sh = std::min(1.0f, g_ffb_shake.exchange(0.0f) * 2.5f);
-                if (sh > 0.08f) g_pads.rumble(i, sh, 0.6f * sh, 60);
-                // and the triggers' own (runtime.cpp, trigger_frame)
+            if (!no_ffb) {   // the rumble from the player's car (pad_rumble.cpp)
+                float lo = g_pad_motor[0].exchange(0.0f), hi = g_pad_motor[1].exchange(0.0f);
+                if (lo > 0.08f || hi > 0.08f) g_pads.rumble(i, lo, hi, 60);
+                // and the triggers' own
                 float tl = g_trigger_rumble[0].exchange(0.0f), tr = g_trigger_rumble[1].exchange(0.0f);
                 tl *= g_trigger_share, tr *= g_trigger_share;
                 if (tl > 0.05f || tr > 0.05f) g_pads.rumble_triggers(i, tl, tr, 60);
