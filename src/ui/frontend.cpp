@@ -600,7 +600,7 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {OPT_SHADOWS, L"SUN SHADOWS", on_off(settings.shadows),
                  L"Cars, trees and scenery cast shadows away from the sun"},
                 {OPT_RT, L"RAY TRACING", !rt_available ? L"N/A" : RT_MODES[settings.ray_tracing],
-                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX, AMD RX 6000 or newer)"
+                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX 30, AMD RX 6000 or newer)"
                                : RT_HINTS[settings.ray_tracing],
                  rt_available},
                 {OPT_SOFT, L"SOFT PARTICLES", on_off(settings.soft),
@@ -608,11 +608,11 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {OPT_HDR, L"HDR LIGHTING", on_off(settings.hdr),
                  L"Bright light keeps its detail instead of clipping to white; exposure adapts gently"},
                 {OPT_REFLECT, L"RT REFLECTIONS", !rt_available ? L"N/A" : on_off(settings.reflections),
-                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX, AMD RX 6000 or newer)"
+                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX 30, AMD RX 6000 or newer)"
                                : L"The scenery, the stands and the other cars mirrored on the cars' paint and glass (with ray tracing on)",
                  rt_available},
                 {OPT_GI, L"GLOBAL ILLUMINATION", !rt_available ? L"N/A" : on_off(settings.gi != 0),
-                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX, AMD RX 6000 or newer)"
+                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX 30, AMD RX 6000 or newer)"
                                : GI_HINTS[settings.gi ? 1 : 0],
                  rt_available},
                 {OPT_DUST, L"DUST", settings.dust ? L"ENHANCED" : L"ORIGINAL",
