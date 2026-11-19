@@ -1052,6 +1052,25 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
             }
         }
     }
+    // The world's back faces (R3DScene::backs: left out of the picture by the
+    // back-face test, but the sun's rays still meet them, r3d_raytrace.cpp):
+    // the scenery stands still, so each is where the camera's move puts it
+    // last frame; the rest (cars, people) keep this frame's place
+    for (R3DVertex& v : out.backs) memcpy(v.prev, v.pos, sizeof(v.prev));
+    if (wv && prev_world_valid_) {
+        const float *ax = wv->world_axes, *cam = wv->camera, *pax = prev_world_axes_, *pcam = prev_world_camera_;
+        auto dot3 = [](const float* p, const float* q) { return p[0] * q[0] + p[1] * q[1] + p[2] * q[2]; };
+        float d[3] = {cam[0] - pcam[0], cam[1] - pcam[1], cam[2] - pcam[2]};
+        bool cut = dot3(d, d) > 10.0f * 10.0f || dot3(ax + 6, pax + 6) < 0.9f || dot3(ax + 3, pax + 3) < 0.9f;
+        size_t end = std::min<size_t>(size_t(wv->back_first) + wv->back_count, out.backs.size());
+        for (size_t i = wv->back_first; !cut && i < end; i++) {
+            R3DVertex& v = out.backs[i];
+            if (v.flags & (R3D_ACTOR | R3D_CAR)) continue;
+            float w[3];
+            for (int k = 0; k < 3; k++) w[k] = cam[k] + dot3(ax + k * 3, v.pos) - pcam[k];
+            for (int k = 0; k < 3; k++) v.prev[k] = w[0] * pax[k] + w[1] * pax[3 + k] + w[2] * pax[6 + k];
+        }
+    }
     prev_world_valid_ = wv != nullptr;
     if (wv) {
         memcpy(prev_world_axes_, wv->world_axes, sizeof(prev_world_axes_));

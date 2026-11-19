@@ -311,6 +311,18 @@ void R3DRayTracer::prepare(const R3DScene& scene, const R3DViewport& world, floa
             size_t end = std::min<size_t>(size_t(vp.back_first) + vp.back_count, scene.backs.size());
             for (size_t i = vp.back_first; i + 2 < end; i += 3) add(&scene.backs[i], false);
         }
+        // So is the world: about half of its polygons face away from the
+        // camera, and which do changes as it turns. Left out, the scenery
+        // facing away let the sun through, and as the camera turned (into a
+        // curve on the mountain) they came back one by one: the cliffs'
+        // shadows popped in over the road in chunks (issue #131). Moved as
+        // the camera moved (R3DSceneBuilder::link_previous).
+        // SR2_RT_BACKS=0: left out, as before
+        static const bool world_backs = !(getenv("SR2_RT_BACKS") && atoi(getenv("SR2_RT_BACKS")) == 0);
+        if (&vp == &world && world_backs) {
+            size_t end = std::min<size_t>(size_t(vp.back_first) + vp.back_count, scene.backs.size());
+            for (size_t i = vp.back_first; i + 2 < end; i += 3) add(&scene.backs[i], true);
+        }
     }
     uint32_t total = 0;
     for (Level& l : levels_) total += uint32_t((l.solid_pos.size() + l.cut_pos.size()) / 9);
