@@ -113,12 +113,15 @@ void pad_rumble_frame(float arcade, bool attract) {
             const float jolt_r = std::fabs(float(int16_t(dang[2] - s.dang[2]))) * ANGLE * 57.3f;
             raw_y = jolt_y, raw_p = jolt_p, raw_r = jolt_r;
             rough_now = std::min(1.0f, jolt_y / 0.6f + (jolt_p + jolt_r) / 0.8f);
-            // A hit: the horizontal acceleration well past what grip gives
-            // (about 1.5 G) or a landing (the vertical speed stopping hard)
-            const float ax = (vx - s.vx) * HZ, az = (vz - s.vz) * HZ;
-            const float a = std::sqrt(ax * ax + az * az) / G;
+            // A hit: the car losing speed far faster than the brakes can (a
+            // wall, a tree, another car: over 2.5 G in a frame) or a hard
+            // landing. (Not the turning acceleration: in fast bends it reached
+            // 2 G and read as hits all the time; small bumps of the body at
+            // the edges of the ground types neither)
+            const float was_v = std::sqrt(s.vx * s.vx + s.vz * s.vz), now_v = std::sqrt(vx * vx + vz * vz);
+            const float lost = (was_v - now_v) * HZ / G;
             const float land = std::max(0.0f, vy - s.vy) * HZ / G;   // pushed up
-            hit_now = std::clamp(std::max((a - 2.0f) / 4.0f, (land - 3.0f) / 6.0f), 0.0f, 1.0f);
+            hit_now = std::clamp(std::max((lost - 2.5f) / 4.0f, (land - 6.0f) / 8.0f), 0.0f, 1.0f);
         }
         s.vy = vy;
         memcpy(s.dang, dang, sizeof dang);
@@ -140,7 +143,7 @@ void pad_rumble_frame(float arcade, bool attract) {
             side_a = std::fabs(fx * vz - fz * vx) / v;
             side_b = std::fabs(-fx * vz - fz * vx) / v;
             const float side = std::min(side_a, side_b);
-            slide = std::clamp((side - 0.09f) / 0.35f, 0.0f, 1.0f) * std::min(1.0f, speed / 20.0f);
+            slide = std::clamp((side - 0.25f) / 0.4f, 0.0f, 1.0f) * std::min(1.0f, speed / 20.0f);
         }
     }
 
@@ -177,12 +180,12 @@ void pad_rumble_frame(float arcade, bool attract) {
     struct Ground { float heavy, buzz, grain; };
     static const Ground GROUND[16] = {
         {0.00f, 0.06f, 0.2f}, {0.00f, 0.06f, 0.2f},   // asphalt: almost still
-        {0.35f, 0.45f, 0.8f}, {0.35f, 0.45f, 0.8f},   // gravel
+        {0.55f, 0.65f, 0.8f}, {0.55f, 0.65f, 0.8f},   // gravel
         {0.00f, 0.03f, 0.1f}, {0.00f, 0.03f, 0.1f},   // smooth
-        {0.55f, 0.40f, 0.9f}, {0.55f, 0.40f, 0.9f},   // roughest (mud, off the road)
+        {0.75f, 0.55f, 0.9f}, {0.75f, 0.55f, 0.9f},   // roughest (mud, off the road)
         {0.05f, 0.12f, 0.4f}, {0.05f, 0.12f, 0.4f},   // hard
-        {0.30f, 0.15f, 0.5f}, {0.30f, 0.15f, 0.5f},   // snow: soft and heavy
-        {0.30f, 0.40f, 0.8f}, {0.30f, 0.40f, 0.8f},   // gravel (the other set)
+        {0.45f, 0.20f, 0.5f}, {0.45f, 0.20f, 0.5f},   // snow: soft and heavy
+        {0.55f, 0.65f, 0.8f}, {0.55f, 0.65f, 0.8f},   // gravel (the other set)
         {0, 0, 0}, {0, 0, 0}};
     const uint32_t ground_bits = rd16(car + 0x46);
     float g_heavy = 0, g_buzz = 0, g_grain = 0;
@@ -196,11 +199,12 @@ void pad_rumble_frame(float arcade, bool attract) {
     const uint32_t section = rd32(car + 0x48);
     const bool bridge = ((ground_bits & 15) == 2 || ((ground_bits >> 4) & 15) == 2) &&   // (a front wheel, as the game)
                         ((section >= 0x1C && section <= 0x21) || (section >= 0x94 && section <= 0x98));
-    static float travelled = 0;
-    travelled += speed / HZ;
+    // (the knocks: on 2 frames, softer 3, about 12 a second: at racing speed
+    // the planks pass faster than the motors could follow one by one)
+    static int plank = 0;
     float knock = 0;
-    if (bridge && travelled > 1.5f) travelled = 0, knock = 0.9f;
-    if (!bridge) travelled = std::fmin(travelled, 1.5f);
+    if (bridge) knock = (plank++ % 5) < 2 ? 1.0f : 0.3f;
+    else plank = 0;
     static uint32_t seed = 12345;
     seed = seed * 1664525u + 1013904223u;
     const float rnd = float(seed >> 8) / float(1 << 24);
@@ -215,8 +219,8 @@ void pad_rumble_frame(float arcade, bool attract) {
 
     // The pad: the low motor carries the heavy things (hits, rough ground,
     // slides), the high one the fine buzz
-    const float low = std::max({hit, 0.75f * rough, 0.5f * slide, road, 0.35f * spin, ground_heavy});
-    const float high = std::max({0.8f * hit, 0.55f * rough, 0.25f * slide, 0.6f * road, 0.25f * spin, ground_buzz});
+    const float low = std::max({hit, 0.5f * rough, 0.3f * slide, road, 0.35f * spin, ground_heavy});
+    const float high = std::max({0.8f * hit, 0.4f * rough, 0.15f * slide, 0.6f * road, 0.25f * spin, ground_buzz});
     bump(g_pad_motor[0], low);
     bump(g_pad_motor[1], high);
 
@@ -227,7 +231,7 @@ void pad_rumble_frame(float arcade, bool attract) {
     if (brake > 0.05f && speed > 3.0f)
         left = brake * std::min(1.0f, speed / 25.0f) * (0.2f + 0.8f * std::clamp(decel / 15.0f, 0.0f, 1.0f));
     right = 0.6f * spin * std::max(gas, 0.3f);
-    const float shared = std::max({0.7f * rough, 0.45f * slide, hit, 0.8f * std::max(ground_heavy, ground_buzz)});
+    const float shared = std::max({0.45f * rough, 0.3f * slide, hit, 0.9f * std::max(ground_heavy, ground_buzz)});
     left = std::max(left, shared * (0.45f + 0.55f * brake));
     right = std::max(right, shared * (0.45f + 0.55f * gas));
     bump(g_trigger_rumble[0], left);
@@ -235,5 +239,5 @@ void pad_rumble_frame(float arcade, bool attract) {
 
     if (log)   // every race frame, with the raw jolts (to tune the thresholds)
         printf("[rumble] ground %04X game %X%X%X%X slip %.2f/%.2f section %3u%s  speed %5.1f  y %6.3f  x %7.2f  z %7.2f  jolt y %.3f p %.3f r %.3f  rough %.2f  slide %.2f  hit %.2f  spin %.2f  arcade %.2f  -> pad %.2f/%.2f  triggers %.2f/%.2f\n",
-               ground_bits, rd32(0x1B0C70), rd32(0x1B0C74), rd32(0x1B0C78), rd32(0x1B0C7C), side_a, side_b, section, bridge ? " BRIDGE" : "", speed, y, rdf(car + 0x00), rdf(car + 0x08), raw_y, raw_p, raw_r, rough, slide, hit, spin, arcade, low, high, left, right);
+               ground_bits, rd32(0x1B0C7C), rd32(0x1B0C78), rd32(0x1B0C74), rd32(0x1B0C70), side_a, side_b, section, bridge ? " BRIDGE" : "", speed, y, rdf(car + 0x00), rdf(car + 0x08), raw_y, raw_p, raw_r, rough, slide, hit, spin, arcade, low, high, left, right);
 }
