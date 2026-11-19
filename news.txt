@@ -13,6 +13,11 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[30] 19 November 2026
+- New OBJECT DISTANCE option (GRAPHICS > WORLD): spectators and roadside objects can now show up to 250 m away instead of 100 m.
+- Some sun shadows on the scenery should no longer pop in by chunks as you drive.
+- Pad rumble now comes from the car: you may feel the ground under the wheels, slides and landings, and the triggers stay quiet outside races.
+
 [29] 19 November 2026
 - PRACTICE has a fifth course, FOREST: the unused stage hidden in the ROM, marked PROTOTYPE since it was never finished.
 - HD number plate: the HD "1" should now only show when you are 1st; other positions keep the game's own plate.
