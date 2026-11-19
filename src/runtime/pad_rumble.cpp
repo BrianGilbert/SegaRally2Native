@@ -9,9 +9,11 @@
 //      +0x64 float x4  wheel speeds, metres per game frame
 //   0x22F3A8  float    speed, m/s
 //
-// Four parts:
-//   rough   the body shaking on a rough surface (the bridges, the bumps): the
-//           frame-to-frame jolts of its height, pitch and roll
+// Five parts:
+//   ground  the surface under the wheels (asphalt, gravel, mud, snow, the
+//           Mountain bridge's planks), from the game's own ground type
+//   rough   the body's jolts: the frame-to-frame changes of its height,
+//           pitch and roll (bumps; the game smooths the body, so small)
 //   slide   the car sliding sideways: the angle between where it points and
 //           where it goes, at speed
 //   hit     a crash or a hard landing: a jump in the acceleration far above
@@ -156,14 +158,59 @@ void pad_rumble_frame(float arcade, bool attract) {
     s.have = true;
     s.frames++;
 
+    // The ground under each wheel: car +0x52, a nibble a wheel (0, 1 the
+    // front), the low 4 bits of the attribute of the road polygon it stands on
+    // (fn_00051F80); the game reads it for grip (table 0x135504), the tyre
+    // sounds and the noise it puts in the arcade wheel's force (table
+    // 0x1354CC: 500 asphalt, 10000 gravel, 12000 the roughest). Pairs:
+    //   0-1 asphalt   2-3, 12-13 gravel/dirt   4-5 smooth   6-7 roughest (mud)
+    //   8-9 hard (concrete, planks)   10-11 snow/ice
+    // A reading of the code, the names not checked in a race. Each gives a
+    // texture: how hard (heavy motor, buzz motor) and how grainy (random from
+    // frame to frame)
+    struct Ground { float heavy, buzz, grain; };
+    static const Ground GROUND[16] = {
+        {0.00f, 0.06f, 0.2f}, {0.00f, 0.06f, 0.2f},   // asphalt: almost still
+        {0.35f, 0.45f, 0.8f}, {0.35f, 0.45f, 0.8f},   // gravel
+        {0.00f, 0.03f, 0.1f}, {0.00f, 0.03f, 0.1f},   // smooth
+        {0.55f, 0.40f, 0.9f}, {0.55f, 0.40f, 0.9f},   // roughest (mud, off the road)
+        {0.05f, 0.12f, 0.4f}, {0.05f, 0.12f, 0.4f},   // hard
+        {0.30f, 0.15f, 0.5f}, {0.30f, 0.15f, 0.5f},   // snow: soft and heavy
+        {0.30f, 0.40f, 0.8f}, {0.30f, 0.40f, 0.8f},   // gravel (the other set)
+        {0, 0, 0}, {0, 0, 0}};
+    const uint32_t ground_bits = rd16(car + 0x52);
+    float g_heavy = 0, g_buzz = 0, g_grain = 0;
+    for (int w = 0; w < 4; w++) {
+        const Ground& g = GROUND[(ground_bits >> (4 * w)) & 15];
+        g_heavy += 0.25f * g.heavy, g_buzz += 0.25f * g.buzz, g_grain += 0.25f * g.grain;
+    }
+    // The bridge: the game plays its own sound on ground 2 in track sections
+    // 0x1C-0x21 and 0x94-0x98 (car +0x48, fn_0003C834): the planks, a knock
+    // every metre and a half or so
+    const uint32_t section = rd32(car + 0x48);
+    const bool bridge = (ground_bits & 15) == 2 &&
+                        ((section >= 0x1C && section <= 0x21) || (section >= 0x94 && section <= 0x98));
+    static float travelled = 0;
+    travelled += speed / HZ;
+    float knock = 0;
+    if (bridge && travelled > 1.5f) travelled = 0, knock = 0.9f;
+    if (!bridge) travelled = std::fmin(travelled, 1.5f);
+    static uint32_t seed = 12345;
+    seed = seed * 1664525u + 1013904223u;
+    const float rnd = float(seed >> 8) / float(1 << 24);
+    const float pace = std::min(1.0f, speed / 20.0f);   // nothing standing, all of it from 72 km/h
+    const float grain = 1.0f - g_grain * rnd;
+    const float ground_heavy = std::max(knock, g_heavy * pace * grain);
+    const float ground_buzz = std::max(0.6f * knock, g_buzz * pace * (1.0f - 0.5f * g_grain * rnd));
+
     const float rough = s.rough * std::min(1.0f, 0.3f + speed / 15.0f);
     const float hit = s.hit;
     const float road = 0.35f * arcade;
 
     // The pad: the low motor carries the heavy things (hits, rough ground,
     // slides), the high one the fine buzz
-    const float low = std::max({hit, 0.75f * rough, 0.5f * slide, road, 0.35f * spin});
-    const float high = std::max({0.8f * hit, 0.55f * rough, 0.25f * slide, 0.6f * road, 0.25f * spin});
+    const float low = std::max({hit, 0.75f * rough, 0.5f * slide, road, 0.35f * spin, ground_heavy});
+    const float high = std::max({0.8f * hit, 0.55f * rough, 0.25f * slide, 0.6f * road, 0.25f * spin, ground_buzz});
     bump(g_pad_motor[0], low);
     bump(g_pad_motor[1], high);
 
@@ -174,13 +221,13 @@ void pad_rumble_frame(float arcade, bool attract) {
     if (brake > 0.05f && speed > 3.0f)
         left = brake * std::min(1.0f, speed / 25.0f) * (0.2f + 0.8f * std::clamp(decel / 15.0f, 0.0f, 1.0f));
     right = 0.6f * spin * std::max(gas, 0.3f);
-    const float shared = std::max({0.7f * rough, 0.45f * slide, hit});
+    const float shared = std::max({0.7f * rough, 0.45f * slide, hit, 0.8f * std::max(ground_heavy, ground_buzz)});
     left = std::max(left, shared * (0.45f + 0.55f * brake));
     right = std::max(right, shared * (0.45f + 0.55f * gas));
     bump(g_trigger_rumble[0], left);
     bump(g_trigger_rumble[1], right);
 
     if (log)   // every race frame, with the raw jolts (to tune the thresholds)
-        printf("[rumble] speed %5.1f  y %6.3f  x %7.2f  z %7.2f  jolt y %.3f p %.3f r %.3f  rough %.2f  slide %.2f  hit %.2f  spin %.2f  arcade %.2f  -> pad %.2f/%.2f  triggers %.2f/%.2f\n",
-               speed, y, rdf(car + 0x00), rdf(car + 0x08), raw_y, raw_p, raw_r, rough, slide, hit, spin, arcade, low, high, left, right);
+        printf("[rumble] ground %04X section %3u%s  speed %5.1f  y %6.3f  x %7.2f  z %7.2f  jolt y %.3f p %.3f r %.3f  rough %.2f  slide %.2f  hit %.2f  spin %.2f  arcade %.2f  -> pad %.2f/%.2f  triggers %.2f/%.2f\n",
+               ground_bits, section, bridge ? " BRIDGE" : "", speed, y, rdf(car + 0x00), rdf(car + 0x08), raw_y, raw_p, raw_r, rough, slide, hit, spin, arcade, low, high, left, right);
 }
