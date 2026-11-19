@@ -57,6 +57,9 @@ struct Options {
     bool reflections = true;         // --no-reflections: no ray traced reflections on the cars
     int gi = 1;                      // --gi off|on: global illumination (the sun's light bounced off the world, ray traced)
     bool dust = true;                // --classic-dust: the game's own flat fans of dust, no particles
+    int object_distance = 250;       // --object-distance: metres ahead of the camera the course's placed
+                                     // objects (spectators, cameramen, signs, cones...) are put in the
+                                     // scene from; the arcade's is 100 (game_hooks.cpp)
     bool sharpen = true;             // --no-sharpen: no sharpening of the 3D image
     bool soft = true;                // --no-soft: hard edges where translucent effects meet geometry
     bool shadows = true;             // --no-shadows: no sun shadows

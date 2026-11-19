@@ -53,6 +53,9 @@ struct FrontendSettings {
     bool reflections = true;   // the world mirrored on the cars (ray tracing)
     int gi = 1;                // global illumination, the sun's light bounced off the world (ray tracing): 0 off, 1 on
     bool dust = true;      // Sega Rally 2: dust and stones as particles (false: the game's own flat fans)
+    // OBJECT DISTANCE: metres ahead of the camera the spectators, cameramen, signs,
+    // cones... appear from: 250, 200, 150 or 100 (the arcade's)
+    int object_distance = 250;
     bool sharpen = true;   // contrast adaptive sharpening
     bool hd_hud = true;    // redrawn HUD and game screens (false: the ROM's own graphics)
     bool hd_liveries = true;   // the cars' redone paint, textures/*.png (false: the ROM's own textures)
@@ -224,7 +227,7 @@ private:
         DEBUG, DEBUG_COURSE, DEBUG_CAR, DEBUG_GEARS, DEBUG_TIME, DEBUG_GO,
         OPT_QUALITY,   // (no row: the first of the option ids, the ones >= it are options)
         OPT_DISPLAY, OPT_VOLUME, OPT_MUSIC, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SUN, OPT_SHADOWS, OPT_SOFT, OPT_HDR, OPT_SHARPEN, OPT_HUD, OPT_LIVERIES,
-        OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_VIBRATION, OPT_RT, OPT_MENU_MUSIC, OPT_REFLECT, OPT_GI, OPT_DUST, OPT_UPDATES,
+        OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_VIBRATION, OPT_RT, OPT_MENU_MUSIC, OPT_REFLECT, OPT_GI, OPT_DUST, OPT_OBJECTS, OPT_UPDATES,
         OPT_DIFFICULTY, OPT_CONNECTED, OPT_TRIGGERS, OPT_RESOLUTION, OPT_SCALE, OPT_VSYNC, OPT_MAXFPS, OPT_BGFPS,
         OPT_EXPERIENCE, OPT_ASPECT, OPT_ARCADE_ASPECT,
         OPT_WHEEL,   // CONTROLS > WHEEL: one row per wheel_lines entry (Item::index)   // OPT_ARCADE_ASPECT: ARCADE ORIGINAL's, under EXPERIENCE

@@ -286,6 +286,24 @@ menu first (0x137124 = 1, then 0x7107C), which ran unseen for some 1900
 frames. Writing -1 (power on) to the main sequence's next entry leaves the
 game stuck.
 
+## Course objects (spectators, cameramen, signs...)
+
+Everything placed along a course that is not part of its scenery models:
+the sprite crowd (SF_NA_*, S_OG_HITO*, SA_W_GUY*), the moving crowd (MM_*),
+cameramen, camera flashes, cones, boards, signs (KANBAN_*), tyre barriers,
+snowmen, animals, birds, the truck... Names in the type table **0xA0824**
+(16 bytes a type: kind 0-4, argument, handler, name pointer).
+
+| Address | What it is |
+|---|---|
+| 0x497CCC | The course's object table, copied from the fixed CROM at the race set-up (Mountain from 0x1002D0, Desert near 0x111E80). 24 bytes an object: u16 type, s16 track point (negative: always on), float x, y, z, u32 attribute, u32 flags (bit 0x8000 = in the scene this frame, 0x2000 = not drawn). Ends with type 0xBB |
+| 0xF54CC / 0xF54D0 | -20.0 / **100.0**: fn_0005D784 puts an object in the scene only between 20 m behind and 100 m ahead of the camera (camera depth), inside the view with 5 m to spare (0xF54D4). OBJECT DISTANCE replaces the 100 (tools/game_hooks.py) |
+| 0xF54DC | 100.0: out of the race (fn_0005D888: attract, replay, podium) the kind-4 objects' distance. OBJECT DISTANCE too |
+
+fn_0005D9F4 runs every frame: the test above for each object, then
+fn_0005D534 draws those with flags & 0xA000 == 0x8000 (per kind; Real3D
+instance nodes from 0x805000 in culling RAM, list 0x804031).
+
 ## Other fields seen (not needed so far)
 
 | Address | What it is |

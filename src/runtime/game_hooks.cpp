@@ -2,6 +2,7 @@
 // (tools/game_hooks.py, game_hooks.h).
 #include "game_hooks.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -182,4 +183,19 @@ uint32_t sr2_course_sound(uint32_t ea) {
         if (ea >= table + FOREST_COURSE * ROW && ea < table + (FOREST_COURSE + 1) * ROW)
             return rd32(ea + (MOUNTAIN - FOREST_COURSE) * ROW);
     return rd32(ea);
+}
+
+// ---- OBJECT DISTANCE -------------------------------------------------------
+// The course's placed objects (table 0x497CCC, 24 bytes each: spectators,
+// cameramen, flashes, cones, signs, tyre barriers, snowmen...) are put in the
+// scene each frame by 0x5D9F4 only when 0x5D784 finds them between 20 m
+// behind and 100 m ahead of the camera (0xF54CC, 0xF54D0) and inside the view
+// with 5 m to spare; out of the race (attract, replay, podium) 0x5D888 takes
+// the kind-4 ones (cameramen, moving crowd...) within 100 m (0xF54DC). So the
+// crowd popped in 100 m ahead. OBJECT DISTANCE stands in for both 100s (the
+// two lfs in game_hooks.py); 100 is the arcade's. At most 400 m: the scene's
+// instance list has room for ~4000 nodes a frame, with no check in the game,
+// and a start line already takes ~330 at 100 m
+double sr2_object_distance() {
+    return double(std::clamp(g_opt.object_distance, 100, 400));
 }
