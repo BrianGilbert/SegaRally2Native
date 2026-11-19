@@ -128,13 +128,18 @@ void pad_rumble_frame(float arcade, bool attract) {
     s.hit = std::max(hit_now, s.hit * 0.88f);
 
     // Slide: where the car points against where it goes
-    float slide = 0;
+    float slide = 0, side_a = 0, side_b = 0;
     if (speed > 6.0f) {
         const float heading = -float(ang[1]) * ANGLE;
         const float fx = std::sin(heading), fz = std::cos(heading);
         const float v = std::sqrt(vx * vx + vz * vz);
         if (v > 1.0f) {
-            const float side = std::fabs(fx * vz - fz * vx) / v;   // sin of the slip angle
+            // (sin of the slip angle; the side of x is a reading of the code,
+            // so both ways are worked out and the smaller taken: the wrong one
+            // reads a big slip on any heading but the axes)
+            side_a = std::fabs(fx * vz - fz * vx) / v;
+            side_b = std::fabs(-fx * vz - fz * vx) / v;
+            const float side = std::min(side_a, side_b);
             slide = std::clamp((side - 0.09f) / 0.35f, 0.0f, 1.0f) * std::min(1.0f, speed / 20.0f);
         }
     }
@@ -158,7 +163,8 @@ void pad_rumble_frame(float arcade, bool attract) {
     s.have = true;
     s.frames++;
 
-    // The ground under each wheel: car +0x52, a nibble a wheel (0, 1 the
+    // The ground under each wheel: car +0x46 (+0x52 of the game's task block,
+    // which the pointer at 0x2242B0 passes by 0xC), a nibble a wheel (0, 1 the
     // front), the low 4 bits of the attribute of the road polygon it stands on
     // (fn_00051F80); the game reads it for grip (table 0x135504), the tyre
     // sounds and the noise it puts in the arcade wheel's force (table
@@ -178,7 +184,7 @@ void pad_rumble_frame(float arcade, bool attract) {
         {0.30f, 0.15f, 0.5f}, {0.30f, 0.15f, 0.5f},   // snow: soft and heavy
         {0.30f, 0.40f, 0.8f}, {0.30f, 0.40f, 0.8f},   // gravel (the other set)
         {0, 0, 0}, {0, 0, 0}};
-    const uint32_t ground_bits = rd16(car + 0x52);
+    const uint32_t ground_bits = rd16(car + 0x46);
     float g_heavy = 0, g_buzz = 0, g_grain = 0;
     for (int w = 0; w < 4; w++) {
         const Ground& g = GROUND[(ground_bits >> (4 * w)) & 15];
@@ -228,6 +234,6 @@ void pad_rumble_frame(float arcade, bool attract) {
     bump(g_trigger_rumble[1], right);
 
     if (log)   // every race frame, with the raw jolts (to tune the thresholds)
-        printf("[rumble] ground %04X section %3u%s  speed %5.1f  y %6.3f  x %7.2f  z %7.2f  jolt y %.3f p %.3f r %.3f  rough %.2f  slide %.2f  hit %.2f  spin %.2f  arcade %.2f  -> pad %.2f/%.2f  triggers %.2f/%.2f\n",
-               ground_bits, section, bridge ? " BRIDGE" : "", speed, y, rdf(car + 0x00), rdf(car + 0x08), raw_y, raw_p, raw_r, rough, slide, hit, spin, arcade, low, high, left, right);
+        printf("[rumble] ground %04X game %X%X%X%X slip %.2f/%.2f section %3u%s  speed %5.1f  y %6.3f  x %7.2f  z %7.2f  jolt y %.3f p %.3f r %.3f  rough %.2f  slide %.2f  hit %.2f  spin %.2f  arcade %.2f  -> pad %.2f/%.2f  triggers %.2f/%.2f\n",
+               ground_bits, rd32(0x1B0C70), rd32(0x1B0C74), rd32(0x1B0C78), rd32(0x1B0C7C), side_a, side_b, section, bridge ? " BRIDGE" : "", speed, y, rdf(car + 0x00), rdf(car + 0x08), raw_y, raw_p, raw_r, rough, slide, hit, spin, arcade, low, high, left, right);
 }
