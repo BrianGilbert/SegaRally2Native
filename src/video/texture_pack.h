@@ -25,7 +25,18 @@ public:
     // written (empty = no dumping); clean_dir: where the originals of the
     // replaced textures are remembered (empty = not kept between runs)
     void init(const std::string& dir, const std::string& dump_dir, const std::string& clean_dir = "");
-    bool active() const { return !available_.empty() || !dump_dir_.empty(); }
+    bool active() const { return unpaint_ || (use_files_ && !available_.empty()) || !dump_dir_.empty(); }
+
+    // HD LIVERIES off: the replacement files are not used (the cars keep the
+    // ROM's own textures); set_unpaint_shadows still applies
+    void set_use_files(bool on);
+    // Sun shadows on: a texture that is another one with a shadow painted in
+    // is drawn as that other one, and the sun shadows put the shadow where it
+    // falls. FOREST's start has its road in five pictures: the plain road and
+    // four copies of it with shadows painted in (each texel there at 0.385 of
+    // its brightness), and with the sun shadows over them every shadow came
+    // twice. The other courses have none (snapshots of all four looked at)
+    void set_unpaint_shadows(bool on);
     // Fewer slots than MAX_SLOTS when the GPU cannot hold that many (R3DRenderer::texture_slots)
     void set_max_slots(uint32_t n) { max_slots_ = n < MAX_SLOTS ? n : MAX_SLOTS; }
 
@@ -64,6 +75,19 @@ private:
     uint64_t decode_texture(uint32_t tex, R3DTextureRam& ram, uint64_t& generation, int& w, int& h);
     uint32_t load_slot(uint64_t hash);   // the replacement's slot, loading it (0 = none)
     uint32_t dirty_slot(uint32_t tex, int w, int h, uint64_t hash);
+    uint32_t unpainted_slot(uint32_t tex, int w, int h, uint64_t hash);
+
+    // set_unpaint_shadows: the textures seen (ARGB1555, 64x64 or larger), to
+    // find a painted texture's original among them
+    struct Seen {
+        uint64_t hash;
+        uint32_t tex;   // its texture word: looked up again (cache_) when its original turns up later
+        int w, h;
+        std::vector<uint16_t> texels;
+    };
+    std::vector<Seen> seen_;
+    std::unordered_map<uint64_t, uint32_t> unpainted_;   // painted texture's hash -> its original's slot
+    bool use_files_ = true, unpaint_ = false;
 
     // The originals of replaced textures, by texture word (several cars use the same place)
     struct Clean {

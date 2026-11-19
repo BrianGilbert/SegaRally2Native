@@ -44,7 +44,47 @@ void decode(uint16_t t, uint32_t fmt, uint8_t* o) {
     }
 }
 
+// The texels of b that t has darkened as a painted shadow does (set_unpaint_shadows):
+// 0 unless at least a fifth of the texels are the same, at least 3 in 100
+// are b's at 0.30-0.47 of its brightness (FOREST's: 0.385) and the others
+// changed are fewer than a tenth of those. First on one texel in 61, as
+// most pairs differ everywhere. (No pair of the other courses' textures
+// comes near: their road with and without a zebra crossing is the closest)
+size_t painted_over(const uint16_t* t, const uint16_t* b, size_t n) {
+    auto lum = [](uint16_t v) { return int((v >> 10) & 31) + int((v >> 5) & 31) + int(v & 31); };
+    size_t darker = 0;
+    for (size_t step : {size_t(61), size_t(1)}) {
+        size_t same = 0, other = 0, all = 0;
+        darker = 0;
+        for (size_t i = 0; i < n; i += step, all++) {
+            if (t[i] == b[i]) {
+                same++;
+                continue;
+            }
+            int lt = lum(t[i]), lb = lum(b[i]);
+            if ((t[i] & 0x8000) == (b[i] & 0x8000) && lb > 6 && lt * 100 >= lb * 30 && lt * 100 <= lb * 47)
+                darker++;
+            else
+                other++;
+        }
+        if (same * 5 < all || darker * 33 < all || other * 10 > darker) return 0;
+    }
+    return darker;
+}
+
 }  // namespace
+
+void TexturePack::set_use_files(bool on) {
+    if (on == use_files_) return;
+    use_files_ = on;
+    cache_.clear();
+}
+
+void TexturePack::set_unpaint_shadows(bool on) {
+    if (on == unpaint_) return;
+    unpaint_ = on;
+    cache_.clear();
+}
 
 void TexturePack::init(const std::string& dir, const std::string& dump_dir, const std::string& clean_dir) {
     dir_ = dir;
@@ -124,7 +164,7 @@ uint32_t TexturePack::resolve(uint32_t tex, R3DTextureRam& ram, uint64_t& genera
 
     if (!dump_dir_.empty() && dumped_.insert(hash).second) png_save(dump_dir_ + name, w, h, rgba_.data());
 
-    if (available_.count(hash)) {
+    if (use_files_ && available_.count(hash)) {
         // A replaced texture: its original is remembered (once), to recognise
         // it later with dirt blended in
         bool known = false;
@@ -141,7 +181,70 @@ uint32_t TexturePack::resolve(uint32_t tex, R3DTextureRam& ram, uint64_t& genera
         }
         return load_slot(hash);
     }
-    return dirty_slot(tex, w, h, hash);
+    if (uint32_t slot = unpainted_slot(tex, w, h, hash)) return slot;
+    return use_files_ ? dirty_slot(tex, w, h, hash) : 0;
+}
+
+// set_unpaint_shadows: a texture (texels_) that is one seen before with a
+// shadow painted in gets a slot with that one's picture; and that one too, so
+// the road is drawn the same way all along (textures from texture memory and
+// pictures in slots are not filtered quite alike). Of several (FOREST: a
+// painted one is also another painted one with a shadow more), the one it
+// darkened most, the plain one. One that turns up later than the textures
+// painted over it: those are looked up again
+uint32_t TexturePack::unpainted_slot(uint32_t tex, int w, int h, uint64_t hash) {
+    if (!unpaint_ || (tex >> 28) != 0 || w < 64 || h < 64) return 0;   // (ARGB1555 only)
+    auto done = unpainted_.find(hash);
+    if (done != unpainted_.end()) return done->second;
+    const size_t n = size_t(w) * h;
+    const Seen* original = nullptr;
+    size_t most = 0;
+    bool known = false;
+    for (const Seen& s : seen_) {
+        known |= s.hash == hash;
+        if (s.hash == hash || s.w != w || s.h != h) continue;
+        if (size_t d = painted_over(texels_.data(), s.texels.data(), n); d > most) {
+            most = d;
+            original = &s;
+        } else if (painted_over(s.texels.data(), texels_.data(), n)) {
+            unpainted_.erase(s.hash);
+            cache_.erase(s.tex);
+        }
+    }
+    uint32_t slot = 0;
+    if (original) {
+        const uint64_t key = original->hash ^ 0x5AD05AD05AD05AD0ull;   // (a slot of its own, never looked up by hash)
+        if (auto loaded = slots_.find(key); loaded != slots_.end()) {
+            slot = loaded->second;
+        } else if (slots_.size() + 1 < max_slots_) {
+            RgbaImage img;
+            img.w = w, img.h = h;
+            img.rgba.resize(n * 4);
+            for (size_t i = 0; i < n; i++) decode(original->texels[i], 0, &img.rgba[i * 4]);
+            slot = uint32_t(slots_.size() + 1);
+            slots_[key] = slot;
+            img.slot = slot;
+            pending_.push_back(std::move(img));
+            unpainted_[original->hash] = slot;
+            cache_.erase(original->tex);
+        }
+        if (slot) {
+            unpainted_[hash] = slot;
+            printf("[textures] %016llx is %016llx with a shadow painted in: drawn without it\n",
+                   (unsigned long long)hash, (unsigned long long)original->hash);
+        }
+    }
+    if (!known) {
+        seen_.push_back({hash, tex, w, h, texels_});
+        // (a course's worth, some 16 MB: the oldest go first)
+        size_t texels = 0;
+        for (const Seen& s : seen_) texels += s.texels.size();
+        while (texels > (8u << 20) && seen_.size() > 1) {
+            texels -= seen_.front().texels.size();
+            seen_.erase(seen_.begin());
+        }
+    }
+    return slot;
 }
 
 uint32_t TexturePack::load_slot(uint64_t hash) {
