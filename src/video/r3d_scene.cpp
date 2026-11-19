@@ -439,13 +439,15 @@ void R3DSceneBuilder::settle_player_car(R3DScene& out) {
         printf("[car] frame %llu car %06X patch %zu road %zu raw %.3f lowest %.3f lift %.3f\n",
                (unsigned long long)out.frame, car->node, patches.size(), road.size(), raw, low[1], lift.height);
     float down = lift.height;
-    if (down <= 0.002f) return;
+    if (down <= 0.002f && !forest_) return;   // (FOREST: its patch may still be raised, below)
     auto lower = [&](R3DVertex& x, float by) {
         for (int k = 0; k < 3; k++) x.pos[k] -= by * up[k], x.prev[k] -= by * up[k];
     };
-    for (uint32_t i = car->opaque_first; i < car->opaque_first + car->opaque_count && i < vs.size(); i++) lower(vs[i], down);
-    for (uint32_t i = car->trans_first; i < car->trans_first + car->trans_count && i < vs.size(); i++) lower(vs[i], down);
-    for (uint32_t i = car->back_first; i < car->back_first + car->back_count && i < out.backs.size(); i++) lower(out.backs[i], down);
+    if (down > 0.002f) {
+        for (uint32_t i = car->opaque_first; i < car->opaque_first + car->opaque_count && i < vs.size(); i++) lower(vs[i], down);
+        for (uint32_t i = car->trans_first; i < car->trans_first + car->trans_count && i < vs.size(); i++) lower(vs[i], down);
+        for (uint32_t i = car->back_first; i < car->back_first + car->back_count && i < out.backs.size(); i++) lower(out.backs[i], down);
+    }
     // The patch: 3 cm clear of the road (on it, the two would flicker through
     // each other), and never lower than this frame's measure puts it: the lift
     // is held while the measure jumps, and something else may have set the
@@ -454,12 +456,15 @@ void R3DSceneBuilder::settle_player_car(R3DScene& out) {
     float patch_down = measured ? std::min(down, raw) : down;
     // FOREST: over some bumps its road is drawn up to some 20 cm above the
     // ground the game lays the patch on, for a few frames at a time (Sergi's
-    // carlog: the middle 22 cm under the road); the patch was under the road
-    // and the shadow went out. There it is raised to 3 cm over the road (only
-    // on FOREST, the other courses as they were)
-    if (forest_ && patch_gap < 0 && patch_gap > -0.5f) patch_down = patch_gap;
+    // carlog: the middle 22 cm under the road), and as the car lands from a
+    // jump the patch comes down to the road (0.4 cm over it for some 15
+    // frames): under the road or on it, the shadow went out or flickered.
+    // There it is raised to 3 cm over the road (only on FOREST, the other
+    // courses as they were)
+    bool raise = forest_ && patch_gap < 0.03f && patch_gap > -0.5f;
+    if (raise) patch_down = patch_gap;
     for (uint32_t k : patches) {
-        if (patch_down > 0.03f || patch_down < 0) lower(vs[k], patch_down - 0.03f);
+        if (patch_down > 0.03f || raise) lower(vs[k], patch_down - 0.03f);
         set_down.insert(k);
     }
     };
