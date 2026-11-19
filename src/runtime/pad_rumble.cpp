@@ -188,7 +188,7 @@ void pad_rumble_frame(float arcade, bool attract) {
     // 0x1C-0x21 and 0x94-0x98 (car +0x48, fn_0003C834): the planks, a knock
     // every metre and a half or so
     const uint32_t section = rd32(car + 0x48);
-    const bool bridge = (ground_bits & 15) == 2 &&
+    const bool bridge = ((ground_bits & 15) == 2 || ((ground_bits >> 4) & 15) == 2) &&   // (a front wheel, as the game)
                         ((section >= 0x1C && section <= 0x21) || (section >= 0x94 && section <= 0x98));
     static float travelled = 0;
     travelled += speed / HZ;
