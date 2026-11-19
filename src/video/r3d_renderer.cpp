@@ -1306,15 +1306,8 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
     (void)tone_read;
     u.soft[3] = tone[0];
     u.sunlight[3] = tone[1];
-    // SUN: more contrast in clear outdoor scenes (sunlit, little of the game's
-    // own fog); the fogged, dark and indoor scenes keep the game's light
-    if (w && sun_ && w->sun_intensity > 0.3f) {
-        float fogged = std::clamp(w->scroll_fog * 2.0f + w->fog_density * 300.0f, 0.0f, 1.0f);
-        float k = 1.0f - fogged;
-        u.sunlight[0] = 1.0f + 0.45f * k;
-        u.sunlight[1] = 1.0f - 0.4f * k;
-        u.sunlight[2] = k;
-    }
+    // SUN: more contrast in clear outdoor scenes (r3d_sun_gains)
+    if (w) u.sunlight[2] = r3d_sun_gains(*w, sun_, u.sunlight[0], u.sunlight[1]);
     u.mirror[3] = reflections_ ? 1.0f : 0.0f;   // r3d.frag: ray traced reflections on the cars
     // The world viewport's spotlight (spec 7.1), applied to the game world
     if (w && w->spot_radius[0] > 0 && w->spot_radius[1] > 0) {

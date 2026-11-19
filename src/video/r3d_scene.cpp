@@ -113,6 +113,28 @@ void R3DSceneBuilder::build(const R3DFrameState& state, R3DScene& out) {
     std::stable_sort(out.viewports.begin(), out.viewports.end(),
                      [](const R3DViewport& a, const R3DViewport& b) { return a.priority < b.priority; });
     if (remove_letterbox_) r3d_strip_letterbox(out);
+    // FOREST (the unused fifth stage) is lit with ambient 0.26 (DESERT and
+    // SNOWY 0.50, MOUNTAIN 0.45, RIVIERA 0.30): what is out of the sun, the
+    // house fronts turned from it at the start and the sun shadows, came out
+    // about half as light as on the other courses. Its world viewport gets
+    // DESERT's ambient and as much less sun as keeps level ground in the sun
+    // as bright as it was, with SUN's gains (FOREST with SUN: sun 1.0 -> 0.86).
+    // SR2_FOREST_AMBIENT=A: that ambient (0: as the game lights it)
+    if (forest_) {
+        static const float forest_ambient =
+            getenv("SR2_FOREST_AMBIENT") ? float(atof(getenv("SR2_FOREST_AMBIENT"))) : 0.5f;
+        for (R3DViewport& v : out.viewports) {
+            if (!v.world || v.ambient >= forest_ambient || v.sun_intensity <= 0) continue;
+            float sun_gain, ambient_gain;
+            r3d_sun_gains(v, sun_on_, sun_gain, ambient_gain);
+            const float* up = v.world_axes + 3;
+            float level = std::max(v.sun[0] * up[0] + v.sun[1] * up[1] + v.sun[2] * up[2], 0.3f);   // the sun on level ground
+            float less = (forest_ambient - v.ambient) * ambient_gain / (sun_gain * level);
+            v.ambient = forest_ambient;
+            // (kept above SUN's threshold, 0.3, or its gains would change with it)
+            v.sun_intensity = std::max(v.sun_intensity - less, std::min(v.sun_intensity, 0.31f));
+        }
+    }
     // SR2_SCENEDUMP=file (debugging aid): the first scene's viewports and vertices as the
     // game places them, to measure outside (heights over the road...)
     if (static int dumps = 0; getenv("SR2_SCENEDUMP") && dumps++ == 0)
