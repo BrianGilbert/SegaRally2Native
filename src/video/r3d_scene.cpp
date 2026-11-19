@@ -910,6 +910,28 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
     // frame (Lost World's: a new std::unordered_map each frame was most of
     // the preparation's time)
     index_.reset((out.vertices.size() + out.backs.size()) / 3 + 16);
+    // A polygon facing the camera whose partner last frame faced away (a back
+    // face, below) is followed only if it is scenery standing still: not a
+    // car or a person, and where the camera's move puts it within 30 cm.
+    // Everything else links as it always has
+    const R3DViewport* still_vp = nullptr;
+    for (const R3DViewport& v : out.viewports)
+        if (v.world) still_vp = &v;
+    bool still_ok = still_vp && prev_world_valid_;
+    if (still_ok) {
+        const float *ax = still_vp->world_axes, *pax = prev_world_axes_;
+        float d[3] = {still_vp->camera[0] - prev_world_camera_[0], still_vp->camera[1] - prev_world_camera_[1], still_vp->camera[2] - prev_world_camera_[2]};
+        float a = ax[6] * pax[6] + ax[7] * pax[7] + ax[8] * pax[8], b = ax[3] * pax[3] + ax[4] * pax[4] + ax[5] * pax[5];
+        still_ok = d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= 10.0f * 10.0f && a >= 0.9f && b >= 0.9f;
+    }
+    auto stands_still = [&](const R3DVertex& v, const float* p) {
+        if (!still_ok || (v.flags & (R3D_ACTOR | R3D_CAR))) return false;
+        const float *ax = still_vp->world_axes, *cam = still_vp->camera, *pax = prev_world_axes_, *pcam = prev_world_camera_;
+        float w[3], e[3];
+        for (int k = 0; k < 3; k++) w[k] = cam[k] + ax[k * 3] * v.pos[0] + ax[k * 3 + 1] * v.pos[1] + ax[k * 3 + 2] * v.pos[2] - pcam[k];
+        for (int k = 0; k < 3; k++) e[k] = w[0] * pax[k] + w[1] * pax[3 + k] + w[2] * pax[6 + k] - p[k];
+        return e[0] * e[0] + e[1] * e[1] + e[2] * e[2] <= 0.3f * 0.3f;
+    };
     uint32_t last_hi = 0;
     bool last_spin = false, have_hi = false;
     const float* spin_move = nullptr;
@@ -937,6 +959,7 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
         size_t j = size_t(was) + corner;
         if (j >= prev_positions_.size() || j >= prev_keys_.size() || prev_keys_[j] != key) continue;
         const float* p = prev_positions_[j].data();
+        if (j >= prev_front_count_ && !stands_still(v, p)) continue;
         float dx = p[0] - v.pos[0], dy = p[1] - v.pos[1], dz = p[2] - v.pos[2];
         float limit = 0.25f * std::max(1.0f, std::fabs(v.pos[2]));
         if (dx * dx + dy * dy + dz * dz > limit * limit) continue;
@@ -1182,6 +1205,7 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
     prev_keys_.resize(out.vertices.size(), 0);
     if (back_links) prev_keys_.insert(prev_keys_.end(), back_keys_.begin(), back_keys_.end());
     prev_keys_.resize(prev_positions_.size(), 0);
+    prev_front_count_ = out.vertices.size();
 }
 
 void R3DSceneBuilder::KeyIndex::reset(size_t count) {

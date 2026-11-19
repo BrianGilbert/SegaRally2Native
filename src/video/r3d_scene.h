@@ -237,6 +237,7 @@ private:
     KeyIndex index_, prev_index_;                        // this frame's, the previous frame's
     std::vector<uint64_t> prev_keys_;                    // the previous frame's vertex keys
     std::vector<std::array<float, 3>> prev_positions_;   // the previous frame's vertices
+    size_t prev_front_count_ = ~size_t(0);              // ... of which those facing the camera (the back faces after)
     struct PrevInstance {
         uint32_t key, path, start;
         float origin[3];
