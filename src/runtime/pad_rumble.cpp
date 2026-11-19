@@ -76,6 +76,7 @@ struct State {
     int16_t dang[3] = {};
     float rough = 0, hit = 0;
     float hvx[8] = {}, hvz[8] = {};   // the last frames' velocity (m/s), for the hits
+    float hspeed[16] = {};            // and speed, for the crashes
 };
 State s;
 
@@ -142,7 +143,19 @@ void pad_rumble_frame(float arcade, bool attract) {
         if (air >= 6) hit_now = std::max(hit_now, std::clamp(float(air) / 40.0f, 0.3f, 1.0f));
         air = 0;
     }
-    s.hit = std::max(hit_now, s.hit * 0.88f);
+    // Crashes: the game's are soft (Sergi's deliberate ones: 15-28 m/s lost
+    // over a few tenths, never a big jump in one frame), so a crash is the
+    // car losing speed fast with the brake up: over 6 m/s in 0.25 s (15
+    // frames) without braking, the full kick from 12. (Hard braking in the
+    // hairpins loses up to ~11 m/s in 0.25 s, but with the brake down)
+    if (s.frames >= 16) {
+        const float lost = s.hspeed[(s.frames + 1) & 15] - speed;   // 15 frames ago
+        const float brake_now = std::clamp(float(g_inputs.brake) / 255.0f, 0.0f, 1.0f);
+        if (brake_now < 0.25f && !g_inputs.handbrake)
+            hit_now = std::max(hit_now, std::clamp((lost - 6.0f) / 6.0f, 0.0f, 1.0f));
+    }
+    // (held ~0.5 s, so a crash is told apart from the gravel's buzz)
+    s.hit = std::max(hit_now, s.hit * 0.94f);
 
     // Slide: where the car points against where it goes
     float slide = 0, side_a = 0, side_b = 0;
@@ -177,6 +190,7 @@ void pad_rumble_frame(float arcade, bool attract) {
 
     s.y = y, s.vx = vx, s.vz = vz;
     s.hvx[s.frames & 7] = vx, s.hvz[s.frames & 7] = vz;
+    s.hspeed[s.frames & 15] = speed;
     memcpy(s.ang, ang, sizeof ang);
     s.have = true;
     s.frames++;
@@ -235,7 +249,7 @@ void pad_rumble_frame(float arcade, bool attract) {
     // The pad: the low motor carries the heavy things (hits, rough ground,
     // slides), the high one the fine buzz
     const float low = std::max({hit, 0.5f * rough, 0.3f * slide, road, 0.35f * spin, ground_heavy});
-    const float high = std::max({0.8f * hit, 0.4f * rough, 0.15f * slide, 0.6f * road, 0.25f * spin, ground_buzz});
+    const float high = std::max({hit, 0.4f * rough, 0.15f * slide, 0.6f * road, 0.25f * spin, ground_buzz});
     bump(g_pad_motor[0], low);
     bump(g_pad_motor[1], high);
 
@@ -253,6 +267,6 @@ void pad_rumble_frame(float arcade, bool attract) {
     bump(g_trigger_rumble[1], right);
 
     if (log)   // every race frame, with the raw jolts (to tune the thresholds)
-        printf("[rumble] ground %04X game %X%X%X%X slip %.2f/%.2f dv6 %.2f vx %.3f vz %.3f section %3u%s  speed %5.1f  y %6.3f  x %7.2f  z %7.2f  jolt y %.3f p %.3f r %.3f  rough %.2f  slide %.2f  hit %.2f  spin %.2f  arcade %.2f  -> pad %.2f/%.2f  triggers %.2f/%.2f\n",
-               ground_bits, rd32(0x1B0C7C), rd32(0x1B0C78), rd32(0x1B0C74), rd32(0x1B0C70), side_a, side_b, dv6, vx, vz, section, bridge ? " BRIDGE" : "", speed, y, rdf(car + 0x00), rdf(car + 0x08), raw_y, raw_p, raw_r, rough, slide, hit, spin, arcade, low, high, left, right);
+        printf("[rumble] ground %04X game %X%X%X%X slip %.2f/%.2f dv6 %.2f gas %.2f brake %.2f vx %.3f vz %.3f section %3u%s  speed %5.1f  y %6.3f  x %7.2f  z %7.2f  jolt y %.3f p %.3f r %.3f  rough %.2f  slide %.2f  hit %.2f  spin %.2f  arcade %.2f  -> pad %.2f/%.2f  triggers %.2f/%.2f\n",
+               ground_bits, rd32(0x1B0C7C), rd32(0x1B0C78), rd32(0x1B0C74), rd32(0x1B0C70), side_a, side_b, dv6, g_inputs.accel / 255.0f, g_inputs.brake / 255.0f, vx, vz, section, bridge ? " BRIDGE" : "", speed, y, rdf(car + 0x00), rdf(car + 0x08), raw_y, raw_p, raw_r, rough, slide, hit, spin, arcade, low, high, left, right);
 }
