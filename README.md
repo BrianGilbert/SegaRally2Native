@@ -46,8 +46,9 @@ versions will not work. `build.bat` says which chips are missing.
 ## Install
 
 You need Windows 10/11 (64-bit) and a GPU with a Vulkan 1.3 driver (most from 2016 on). Ray
-tracing needs an NVIDIA RTX 30 or an AMD RX 6000 or newer; DLAA and DLSS, an NVIDIA RTX. On other
-cards those options switch themselves off, and the game builds the same on any GPU.
+tracing needs an NVIDIA RTX 30 or an AMD RX 7000 or newer (not an integrated GPU); DLAA and
+DLSS, an NVIDIA RTX. On other cards those options switch themselves off, and the game builds
+the same on any GPU.
 
 Install it with **[NicoLauncher](https://github.com/snicolast/NicoLauncher-Hub)**, a free app that
 downloads, builds, updates and starts the game for you. No Visual Studio, nothing to set up by hand.
