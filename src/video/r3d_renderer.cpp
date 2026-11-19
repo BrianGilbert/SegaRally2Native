@@ -64,18 +64,6 @@ struct AtmosphereUniform {
 // ray tracing were blotchy and thin ones vanished)
 constexpr uint32_t SHADOW_SIZE = 4096;   // shadow map, square
 constexpr float SHADOW_RANGE = 100.0f;   // how far in front of the camera shadows are drawn (view units)
-// Only what stands up to this height above the ground under the camera casts
-// sun shadows (canopies and roofs high above would put whole scenes in the
-// dark). It was 35: on the mountain the upper tiers of the cliffs stood
-// around that height, and as the ground under the camera rose or the
-// estimate of it moved (the valley in view, then not) they came in tier by
-// tier: the cliffs' shadows swept over the road in chunks. The scenery far
-// beyond (the backdrop mountains, 460 m and more up) still casts none.
-// SR2_SHADOW_HEIGHT=35: as before
-float shadow_caster_height() {
-    static const float h = getenv("SR2_SHADOW_HEIGHT") ? float(atof(getenv("SR2_SHADOW_HEIGHT"))) : 300.0f;
-    return h;
-}
 // The shadow map's casters include the world's polygons turned away from the
 // camera (R3DScene::backs), as the traced shadows' do: left out, about half
 // the scenery cast no shadow, and as the camera turned the hills' and
@@ -1454,7 +1442,7 @@ float R3DRenderer::gi_turn() const {
 void R3DRenderer::record_ray_tracing(const Frame& f) {
     if (!rt_frame_ || !rt_world_) return;
     // the high level too: the cars' reflections (r3d.frag) see the canopies and roofs
-    rt_.prepare(*scene_, *rt_world_, interp_, shadow_up_, shadow_height_, shadow_caster_height(), true);
+    rt_.prepare(*scene_, *rt_world_, interp_, shadow_up_, shadow_height_, 35.0f, true);
     if (rt_.generation() != rt_generation_) {
         rt_generation_ = rt_.generation();
         VkDescriptorBufferInfo cut{rt_.cutouts(), 0, VK_WHOLE_SIZE};
@@ -1516,7 +1504,7 @@ void R3DRenderer::record_shadows(const Frame& f) {
             // Shadow pass marker, and only casters up to this height above the ground
             for (int i = 0; i < 3; i++) pc.sun[i] = shadow_up_[i];
             pc.fog_color[0] = shadow_height_;
-            pc.fog_color[1] = shadow_caster_height();
+            pc.fog_color[1] = 35.0f;
             pc.fog_color[3] = -1.0f;
             vkCmdPushConstants(cmd, r3d_layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                sizeof(pc), &pc);
