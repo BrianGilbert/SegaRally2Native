@@ -3,6 +3,7 @@
 // down -Z, Y up), grouped by viewport and pass. See docs/real3d_spec.md
 // sections 2-5.
 #pragma once
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -98,6 +99,20 @@ struct R3DViewport {
     float scenery_far = 0;      // distance of the farthest scenery (most of it is nearer)
 };
 
+// SUN (sun on): more contrast in clear outdoor scenes (sunlit, little of the
+// game's own fog), the fogged, dark and indoor ones keep the game's light.
+// The world viewport's gains on the sun and the ambient, and how clear it is
+// (0: the game's own light; R3DRenderer's atmosphere, r3d.frag)
+inline float r3d_sun_gains(const R3DViewport& w, bool sun_on, float& sun_gain, float& ambient_gain) {
+    sun_gain = ambient_gain = 1.0f;
+    if (!sun_on || w.sun_intensity <= 0.3f) return 0.0f;
+    float fogged = std::clamp(w.scroll_fog * 2.0f + w.fog_density * 300.0f, 0.0f, 1.0f);
+    float k = 1.0f - fogged;
+    sun_gain = 1.0f + 0.45f * k;
+    ambient_gain = 1.0f - 0.4f * k;
+    return k;
+}
+
 struct R3DScene {
     std::vector<R3DVertex> vertices;
     std::vector<R3DViewport> viewports;   // sorted by priority, then list order
@@ -143,6 +158,11 @@ public:
     // road) left out, where the traced sun shadows of the cars themselves
     // take their place
     void set_hide_blob_shadows(bool on) { hide_blob_shadows_ = on; }
+    // FOREST (the race's course, from the game's RAM): its world lit with
+    // more ambient light and as much less sun as keeps the sunlit ground as
+    // bright (build). sun_on: the SUN option (r3d_sun_gains); shadows_on: the
+    // sun shadows (the road's shadows the game paints with a grey colour left out)
+    void set_forest(bool on, bool sun_on, bool shadows_on) { forest_ = on, sun_on_ = sun_on, shadows_on_ = shadows_on; }
     // Replacement textures (nullptr = none)
     void set_texture_pack(TexturePack* pack, R3DTextureRam* ram) {
         pack_ = pack;
@@ -265,6 +285,7 @@ private:
     std::unordered_map<uint32_t, uint32_t> instance_count_;
     uint32_t node_key_ = 0, viewport_key_ = 0;
     bool hide_blob_shadows_ = false;
+    bool forest_ = false, sun_on_ = true, shadows_on_ = true;
     // settle_player_car: how far above the road the game keeps the player's car (-1: not known yet)
     void settle_player_car(R3DScene& out);
     struct CarLift {

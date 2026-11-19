@@ -113,6 +113,49 @@ void R3DSceneBuilder::build(const R3DFrameState& state, R3DScene& out) {
     std::stable_sort(out.viewports.begin(), out.viewports.end(),
                      [](const R3DViewport& a, const R3DViewport& b) { return a.priority < b.priority; });
     if (remove_letterbox_) r3d_strip_letterbox(out);
+    // FOREST (the unused fifth stage) is lit with ambient 0.26 (DESERT and
+    // SNOWY 0.50, MOUNTAIN 0.45, RIVIERA 0.30): what is out of the sun, the
+    // house fronts turned from it at the start and the sun shadows, came out
+    // about half as light as on the other courses. Its world viewport gets
+    // DESERT's ambient and as much less sun as keeps level ground in the sun
+    // as bright as it was, with SUN's gains (FOREST with SUN: sun 1.0 -> 0.86).
+    // SR2_FOREST_AMBIENT=A: that ambient (0: as the game lights it)
+    if (forest_) {
+        static const float forest_ambient =
+            getenv("SR2_FOREST_AMBIENT") ? float(atof(getenv("SR2_FOREST_AMBIENT"))) : 0.5f;
+        for (R3DViewport& v : out.viewports) {
+            if (!v.world || v.ambient >= forest_ambient || v.sun_intensity <= 0) continue;
+            float sun_gain, ambient_gain;
+            r3d_sun_gains(v, sun_on_, sun_gain, ambient_gain);
+            const float* up = v.world_axes + 3;
+            float level = std::max(v.sun[0] * up[0] + v.sun[1] * up[1] + v.sun[2] * up[2], 0.3f);   // the sun on level ground
+            float less = (forest_ambient - v.ambient) * ambient_gain / (sun_gain * level);
+            v.ambient = forest_ambient;
+            // (kept above SUN's threshold, 0.3, or its gains would change with it)
+            v.sun_intensity = std::max(v.sun_intensity - less, std::min(v.sun_intensity, 0.31f));
+        }
+        // With the sun shadows, the road's shadows the game paints with the
+        // polygon's colour instead of in the texture (TexturePack::set_unpaint_shadows):
+        // a world texture also drawn white this frame, here in a grey of 0.30-0.47
+        // (FOREST's arch at the start: the plain road in 0x60, 0.38), drawn white
+        if (shadows_on_) {
+            std::unordered_set<uint32_t> white;
+            auto world_solid = [](const R3DVertex& x) {
+                return (x.flags & (R3D_WORLD | R3D_TEXTURED | R3D_LUMINOUS | R3D_ACTOR)) == (R3D_WORLD | R3D_TEXTURED);
+            };
+            for (size_t i = 0; i + 2 < out.vertices.size(); i += 3)
+                if (world_solid(out.vertices[i]) && (out.vertices[i].color & 0x00FFFFFFu) == 0x00FFFFFFu)
+                    white.insert(out.vertices[i].tex);
+            for (size_t i = 0; i + 2 < out.vertices.size(); i += 3) {
+                R3DVertex* tri = &out.vertices[i];
+                uint32_t c = tri[0].color, r = c & 0xFF;
+                if (!world_solid(tri[0]) || ((c >> 8) & 0xFF) != r || ((c >> 16) & 0xFF) != r || r < 0x4D || r > 0x78 ||
+                    !white.count(tri[0].tex))
+                    continue;
+                for (int k = 0; k < 3; k++) tri[k].color |= 0x00FFFFFFu;
+            }
+        }
+    }
     // SR2_SCENEDUMP=file (debugging aid): the first scene's viewports and vertices as the
     // game places them, to measure outside (heights over the road...)
     if (static int dumps = 0; getenv("SR2_SCENEDUMP") && dumps++ == 0)
@@ -305,7 +348,7 @@ void R3DSceneBuilder::settle_player_car(R3DScene& out) {
         return ground > -1e29f;
     };
     // This frame's measure
-    float raw = -1;
+    float raw = -1, patch_gap = 1;   // patch_gap: the patch over the road (its middle), when measured
     std::vector<float> gaps;
     for (size_t i = 0; i < patches.size(); i += 3) {
         const float* p = vs[patches[i]].pos;
@@ -314,7 +357,15 @@ void R3DSceneBuilder::settle_player_car(R3DScene& out) {
     }
     if (gaps.size() >= 8) {
         std::nth_element(gaps.begin(), gaps.begin() + gaps.size() / 2, gaps.end());
-        raw = gaps[gaps.size() / 2];
+        raw = patch_gap = gaps[gaps.size() / 2];
+        // FOREST (the patch raised below): by its lowest fifth, so a patch
+        // tilted against the road (landing from a jump) is clear of it all
+        // over; not where that is far under the middle (a bank beside the road)
+        if (forest_) {
+            std::nth_element(gaps.begin(), gaps.begin() + gaps.size() / 5, gaps.begin() + gaps.size() / 2);
+            float low = gaps[gaps.size() / 5];
+            if (raw - low <= 0.1f) patch_gap = low;
+        }
     } else if (count >= 90) {
         // No patch: the game lays none under the cars farther away (some 40 m
         // on), which hover all the same, and over a road drawn with less
@@ -396,21 +447,32 @@ void R3DSceneBuilder::settle_player_car(R3DScene& out) {
         printf("[car] frame %llu car %06X patch %zu road %zu raw %.3f lowest %.3f lift %.3f\n",
                (unsigned long long)out.frame, car->node, patches.size(), road.size(), raw, low[1], lift.height);
     float down = lift.height;
-    if (down <= 0.002f) return;
+    if (down <= 0.002f && !forest_) return;   // (FOREST: its patch may still be raised, below)
     auto lower = [&](R3DVertex& x, float by) {
         for (int k = 0; k < 3; k++) x.pos[k] -= by * up[k], x.prev[k] -= by * up[k];
     };
-    for (uint32_t i = car->opaque_first; i < car->opaque_first + car->opaque_count && i < vs.size(); i++) lower(vs[i], down);
-    for (uint32_t i = car->trans_first; i < car->trans_first + car->trans_count && i < vs.size(); i++) lower(vs[i], down);
-    for (uint32_t i = car->back_first; i < car->back_first + car->back_count && i < out.backs.size(); i++) lower(out.backs[i], down);
+    if (down > 0.002f) {
+        for (uint32_t i = car->opaque_first; i < car->opaque_first + car->opaque_count && i < vs.size(); i++) lower(vs[i], down);
+        for (uint32_t i = car->trans_first; i < car->trans_first + car->trans_count && i < vs.size(); i++) lower(vs[i], down);
+        for (uint32_t i = car->back_first; i < car->back_first + car->back_count && i < out.backs.size(); i++) lower(out.backs[i], down);
+    }
     // The patch: 3 cm clear of the road (on it, the two would flicker through
     // each other), and never lower than this frame's measure puts it: the lift
     // is held while the measure jumps, and something else may have set the
     // patch down already (at the desert's start a held lift pushed it under
     // the road for half a second)
     float patch_down = measured ? std::min(down, raw) : down;
+    // FOREST: over some bumps its road is drawn up to some 20 cm above the
+    // ground the game lays the patch on, for a few frames at a time (Sergi's
+    // carlog: the middle 22 cm under the road), and as the car lands from a
+    // jump the patch comes down to the road (0.4 cm over it for some 15
+    // frames): under the road or on it, the shadow went out or flickered.
+    // There it is raised to 3 cm over the road, by its lowest fifth (patch_gap;
+    // only on FOREST, the other courses as they were)
+    bool raise = forest_ && patch_gap < 0.03f && patch_gap > -0.5f;
+    if (raise) patch_down = patch_gap;
     for (uint32_t k : patches) {
-        if (patch_down > 0.03f) lower(vs[k], patch_down - 0.03f);
+        if (patch_down > 0.03f || raise) lower(vs[k], patch_down - 0.03f);
         set_down.insert(k);
     }
     };
