@@ -37,7 +37,7 @@ struct FrontendSettings {
     int speakers = 0;  // 0 stereo, 1 surround 4.0, 2 headphones (AudioStream::Speakers)
     int rear_boost = 6;  // dB on the rear pair: 0, 3, 6, 9, 12
     bool cubic_samples = true;   // smooth (cubic) sample interpolation instead of the original linear one
-    int aa = 0;        // 0 MSAA, 1 DLAA, 2 off, 3 DLSS QUALITY, 4 BALANCED, 5 PERFORMANCE, 6 ULTRA PERFORMANCE (next launch)
+    int aa = 0;        // 0 MSAA, 1 DLAA, 2 off, 3 DLSS QUALITY, 4 BALANCED, 5 PERFORMANCE, 6 ULTRA PERFORMANCE, 7 FXAA (next launch)
     // settings.ini only (dlss_model = auto / k / m / l), for advanced users: the
     // model DLAA and DLSS use. 0 AUTO (dlss::preset_for), 1 K, 2 M, 3 L
     int dlss_model = 0;
@@ -150,6 +150,7 @@ public:
     int client_w = 0, client_h = 0, desktop_w = 0, desktop_h = 0;   // the window's inside, the desktop (app.cpp)
     int refresh_hz = 60;                            // the monitor's (MAX FPS MONITOR)
     bool rt_available = false;   // the GPU can trace rays (RAY TRACING option)
+    bool dlss_available = true;  // the GPU can run DLAA and DLSS (an NVIDIA RTX): otherwise they are left out of ANTI-ALIASING
     std::wstring gamepads;  // the pads connected, for the CONTROLS tab ("" = none)
     // CONTROLS > WHEEL (app.cpp fills them from wheel.h's wheel_rows): choosing a
     // row gives WheelRow with its number and direction; while a control listens

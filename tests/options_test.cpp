@@ -87,6 +87,9 @@ int main() {
         CHECK(parse(b, {"--aa", "dlss_performance", "--dlss-model", "l"}) && b.dlss == 3 && b.dlss_model == 3);
         CHECK(parse(b, {"--aa", "dlss_ultra", "--dlss-model", "auto"}) && b.dlss == 4 && b.dlss_model == 0);
         CHECK(parse(b, {"--aa", "dlaa", "--dlss-model", "k"}) && b.dlaa && b.dlss == 0 && b.dlss_model == 1);
+        Options f;   // FXAA: no MSAA, no DLAA
+        CHECK(parse(f, {"--aa", "fxaa"}) && f.fxaa && !f.dlaa && f.msaa == 1);
+        CHECK(parse(b, {"--aa", "dlaa"}) && !b.fxaa);
         CHECK(q.auto_scripts[1] == "start@20");
         CHECK(q.traces.size() == 1 && q.diff == "10F650@300" && q.replay == "out/snap/snap_1.bin");
     }
