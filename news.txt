@@ -13,6 +13,9 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[34] 20 November 2026
+- NVIDIA RTX: DLAA and DLSS now work in installs made with NicoLauncher. Until now those installs quietly used another anti-aliasing instead. Press Update in the launcher to get them (it downloads about 60 MB from NVIDIA).
+
 [33] 20 November 2026
 - FOREST: areas out of the sun (shadows, the shaded house fronts at the start) should look lighter, closer to the other courses.
 - FOREST: the dark band across the road under the start's arch should be gone.
