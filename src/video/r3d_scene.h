@@ -235,6 +235,7 @@ private:
         uint32_t find(uint64_t key) const;       // EMPTY if absent
     };
     KeyIndex index_, prev_index_;                        // this frame's, the previous frame's
+    KeyIndex back_front_, back_near_;                    // link_previous: the world's corners facing the camera, by place and by 5 cm cell
     std::vector<uint64_t> prev_keys_;                    // the previous frame's vertex keys
     std::vector<std::array<float, 3>> prev_positions_;   // the previous frame's vertices
     size_t prev_front_count_ = ~size_t(0);              // ... of which those facing the camera (the back faces after)

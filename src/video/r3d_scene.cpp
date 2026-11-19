@@ -1147,23 +1147,26 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
             auto cell = [](int64_t x, int64_t y, int64_t z) {
                 return (uint64_t(x) * 0x9E3779B97F4A7C15ull) ^ (uint64_t(y) * 0xC2B2AE3D27D4EB4Full) ^ (uint64_t(z) * 0x165667B19E3779F9ull);
             };
-            std::unordered_map<uint64_t, uint32_t> front;   // a corner's position -> a vertex facing the camera there
-            std::unordered_map<uint64_t, uint32_t> near_front;   // a grid cell -> one there
-            front.reserve(size_t(wv->opaque_count) + wv->trans_count);
-            near_front.reserve(size_t(wv->opaque_count) + wv->trans_count);
+            // (open-addressing tables kept from frame to frame: two
+            // std::unordered_map of some 20000 entries built every frame took
+            // 2 ms of the frame's preparation at the Mountain's start)
+            KeyIndex& front = back_front_;        // a corner's position -> a vertex facing the camera there
+            KeyIndex& near_front = back_near_;    // a grid cell -> one there
+            front.reset(size_t(wv->opaque_count) + wv->trans_count);
+            near_front.reset(size_t(wv->opaque_count) + wv->trans_count);
             for (auto [first, count] : {std::pair{wv->opaque_first, wv->opaque_count}, std::pair{wv->trans_first, wv->trans_count}})
                 for (uint32_t i = first; i < first + count && i < out.vertices.size(); i++) {
                     const float* q = out.vertices[i].pos;
-                    front.emplace(bits(q), i);
+                    front.insert(bits(q), i);
                     if (out.vertices[i].flags & (R3D_ACTOR | R3D_CAR)) continue;
-                    near_front.emplace(cell(int64_t(std::floor(q[0] / CELL)), int64_t(std::floor(q[1] / CELL)), int64_t(std::floor(q[2] / CELL))), i);
+                    near_front.insert(cell(int64_t(std::floor(q[0] / CELL)), int64_t(std::floor(q[1] / CELL)), int64_t(std::floor(q[2] / CELL))), i);
                 }
             for (size_t i = wv->back_first; i < end; i++) {
                 R3DVertex& v = out.backs[i];
                 if (back_linked[i]) continue;
-                auto f = front.find(bits(v.pos));
-                if (f != front.end() && memcmp(out.vertices[f->second].pos, v.pos, 12) == 0) {
-                    memcpy(v.prev, out.vertices[f->second].prev, sizeof(v.prev));
+                uint32_t f = front.find(bits(v.pos));
+                if (f != KeyIndex::EMPTY && memcmp(out.vertices[f].pos, v.pos, 12) == 0) {
+                    memcpy(v.prev, out.vertices[f].prev, sizeof(v.prev));
                     continue;
                 }
                 if (v.flags & (R3D_ACTOR | R3D_CAR)) continue;
@@ -1173,9 +1176,9 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
                 for (int dx = -1; dx <= 1; dx++)
                     for (int dy = -1; dy <= 1; dy++)
                         for (int dz = -1; dz <= 1; dz++) {
-                            auto n = near_front.find(cell(c[0] + dx, c[1] + dy, c[2] + dz));
-                            if (n == near_front.end()) continue;
-                            const R3DVertex& o = out.vertices[n->second];
+                            uint32_t n = near_front.find(cell(c[0] + dx, c[1] + dy, c[2] + dz));
+                            if (n == KeyIndex::EMPTY) continue;
+                            const R3DVertex& o = out.vertices[n];
                             float e[3] = {o.pos[0] - v.pos[0], o.pos[1] - v.pos[1], o.pos[2] - v.pos[2]};
                             float d = dot3(e, e);
                             if (d < best_d) best_d = d, best = &o;
