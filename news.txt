@@ -13,6 +13,12 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[32] 19 November 2026
+- New FXAA anti-aliasing for cards without DLSS (GTX, AMD, Intel): it replaces the heavier MSAA 4x those cards used before, which may help performance.
+- Ray tracing, RT reflections and Global Illumination are now only offered on NVIDIA RTX 30, AMD RX 7000 or newer, and Intel Arc cards. On other GPUs (GTX 10 and 16, RTX 20, RX 6000, integrated ones like the Steam Deck's) they show N/A, which may help performance there.
+- Performance should be close to what it was before the last update again: ambient occlusion costs much less GPU time, which may help most at high resolutions and on weaker cards.
+- FOREST: with sun shadows on, the shadows painted into the road should no longer show twice.
+
 [31] 19 November 2026
 - Performance improvements and optimizations, which should mean fewer dropped frames in demanding spots.
 - With Global Illumination on, the faint film of dots on the tarmac that moved with the car should be gone.
