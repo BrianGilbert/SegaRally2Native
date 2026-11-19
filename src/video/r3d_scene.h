@@ -160,8 +160,9 @@ public:
     void set_hide_blob_shadows(bool on) { hide_blob_shadows_ = on; }
     // FOREST (the race's course, from the game's RAM): its world lit with
     // more ambient light and as much less sun as keeps the sunlit ground as
-    // bright (build). sun_on: the SUN option (r3d_sun_gains)
-    void set_forest(bool on, bool sun_on) { forest_ = on, sun_on_ = sun_on; }
+    // bright (build). sun_on: the SUN option (r3d_sun_gains); shadows_on: the
+    // sun shadows (the road's shadows the game paints with a grey colour left out)
+    void set_forest(bool on, bool sun_on, bool shadows_on) { forest_ = on, sun_on_ = sun_on, shadows_on_ = shadows_on; }
     // Replacement textures (nullptr = none)
     void set_texture_pack(TexturePack* pack, R3DTextureRam* ram) {
         pack_ = pack;
@@ -284,7 +285,7 @@ private:
     std::unordered_map<uint32_t, uint32_t> instance_count_;
     uint32_t node_key_ = 0, viewport_key_ = 0;
     bool hide_blob_shadows_ = false;
-    bool forest_ = false, sun_on_ = true;
+    bool forest_ = false, sun_on_ = true, shadows_on_ = true;
     // settle_player_car: how far above the road the game keeps the player's car (-1: not known yet)
     void settle_player_car(R3DScene& out);
     struct CarLift {

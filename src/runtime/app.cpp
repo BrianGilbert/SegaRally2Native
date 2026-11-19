@@ -1007,7 +1007,7 @@ int main(int argc, char** argv) {
                 double from = qpc_seconds();
                 builder.set_fov_widened(g_wide_applied);
                 builder.set_hide_blob_shadows(g_opt.shadows && g_opt.ray_tracing >= 1 && renderer.ray_tracing_available());
-                builder.set_forest(forest_race(), g_opt.sun);
+                builder.set_forest(forest_race(), g_opt.sun, g_opt.shadows);
                 builder.set_texture_pack(texture_pack(), &g_texture_ram);
                 builder.set_view_wide(g_opt.max_aspect > 4.0f / 3.0f + 0.01f ? std::max(1.0f, g_wide_view.load()) : 1.0f);
                 builder.build(*state, p->scene);
@@ -1738,7 +1738,7 @@ int main(int argc, char** argv) {
                 std::lock_guard<std::mutex> lock(prep_mutex);
                 builder.set_fov_widened(g_wide_applied);
                 builder.set_hide_blob_shadows(g_opt.shadows && g_opt.ray_tracing >= 1 && renderer.ray_tracing_available());
-                builder.set_forest(forest_race(), g_opt.sun);
+                builder.set_forest(forest_race(), g_opt.sun, g_opt.shadows);
                 builder.set_texture_pack(texture_pack(), &g_texture_ram);
                 builder.set_view_wide(g_opt.max_aspect > 4.0f / 3.0f + 0.01f ? std::max(1.0f, g_wide_view.load()) : 1.0f);
                 builder.build(*next_state, own_scene);

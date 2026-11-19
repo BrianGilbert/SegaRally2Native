@@ -134,6 +134,27 @@ void R3DSceneBuilder::build(const R3DFrameState& state, R3DScene& out) {
             // (kept above SUN's threshold, 0.3, or its gains would change with it)
             v.sun_intensity = std::max(v.sun_intensity - less, std::min(v.sun_intensity, 0.31f));
         }
+        // With the sun shadows, the road's shadows the game paints with the
+        // polygon's colour instead of in the texture (TexturePack::set_unpaint_shadows):
+        // a world texture also drawn white this frame, here in a grey of 0.30-0.47
+        // (FOREST's arch at the start: the plain road in 0x60, 0.38), drawn white
+        if (shadows_on_) {
+            std::unordered_set<uint32_t> white;
+            auto world_solid = [](const R3DVertex& x) {
+                return (x.flags & (R3D_WORLD | R3D_TEXTURED | R3D_LUMINOUS | R3D_ACTOR)) == (R3D_WORLD | R3D_TEXTURED);
+            };
+            for (size_t i = 0; i + 2 < out.vertices.size(); i += 3)
+                if (world_solid(out.vertices[i]) && (out.vertices[i].color & 0x00FFFFFFu) == 0x00FFFFFFu)
+                    white.insert(out.vertices[i].tex);
+            for (size_t i = 0; i + 2 < out.vertices.size(); i += 3) {
+                R3DVertex* tri = &out.vertices[i];
+                uint32_t c = tri[0].color, r = c & 0xFF;
+                if (!world_solid(tri[0]) || ((c >> 8) & 0xFF) != r || ((c >> 16) & 0xFF) != r || r < 0x4D || r > 0x78 ||
+                    !white.count(tri[0].tex))
+                    continue;
+                for (int k = 0; k < 3; k++) tri[k].color |= 0x00FFFFFFu;
+            }
+        }
     }
     // SR2_SCENEDUMP=file (debugging aid): the first scene's viewports and vertices as the
     // game places them, to measure outside (heights over the road...)
