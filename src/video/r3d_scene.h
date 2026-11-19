@@ -50,6 +50,10 @@ enum : uint32_t {
     R3D_NO_SHADOW = 1 << 20,   // receives no sun shadows (the dust's particles)
     R3D_DUST = 1 << 23,        // DUST: ENHANCED: a particle drawn by r3d.frag's dust() (r3d_dust.cpp)
     R3D_OWN_TEXTURE = 1 << 24, // replace is a picture of the port's own (R3DSceneBuilder::own_texture), not the pack's
+    // Fading in or out by the game's LOD (drawn translucent only for that): it
+    // still casts a traced sun shadow, as solid as the top 6 bits say (0..63)
+    R3D_LOD_FADE = 1 << 25,
+    R3D_LOD_SHADOW_SHIFT = 26,
 };
 
 struct R3DViewport {
@@ -169,6 +173,11 @@ private:
     struct Attribs {
         int tex_x = 0, tex_y = 0, page = 0;
         float model_scale = 1, alpha = 1;
+        // How solid a caster of sun shadows it is while the LOD fades it: of
+        // two models cross-fading only the one more on screen casts (else the
+        // shadow paled mid-swap), and a model fading in at the far end casts
+        // as much as it is drawn
+        float shadow = 1;
         bool no_cull = false;
     };
     struct PrevVertex {

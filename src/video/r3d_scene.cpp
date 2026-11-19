@@ -1342,16 +1342,24 @@ void R3DSceneBuilder::node(uint32_t addr, const Mat& parent, Attribs a, int dept
         else if (fade < 1.0f / 32.0f) fade = 0;
         float parent_alpha = a.alpha;
         bool models = child & 0x01000000;
-        auto visit = [&](uint32_t e, float alpha) {
+        auto visit = [&](uint32_t e, float alpha, float shadow) {
             Attribs b = a;
             b.alpha = alpha;
+            b.shadow = a.shadow * shadow;
             if (models) model(e & 0xFFFFFF, m, b);
             else node(e & 0xFFFFFF, m, b, depth + 1);
         };
-        if (fade > 0) visit(entry[k], parent_alpha * fade);
-        if (fade < 1 && k != 3) visit(entry[k + 1], parent_alpha * (1 - fade));
+        // (cross-fading with the next model: the one more on screen casts the
+        // whole shadow; the last one, alone, fading out at the far end: as much as it is drawn)
+        bool partner = fade < 1 && k != 3;
+        if (fade > 0) visit(entry[k], parent_alpha * fade, partner ? (fade >= 0.5f ? 1.0f : 0.0f) : fade);
+        if (partner) visit(entry[k + 1], parent_alpha * (1 - fade), fade >= 0.5f ? 0.0f : 1.0f);
     } else {
-        if (!no_lod && !a.no_cull) a.alpha *= std::clamp(fac[3] * (lod_scale - del[3]), 0.0f, 1.0f);
+        if (!no_lod && !a.no_cull) {
+            float fade = std::clamp(fac[3] * (lod_scale - del[3]), 0.0f, 1.0f);
+            a.alpha *= fade;
+            a.shadow *= fade;
+        }
         node_ptr(child, m, a, depth + 1);
     }
 }
@@ -1464,6 +1472,13 @@ void R3DSceneBuilder::model(uint32_t addr, const Mat& m, const Attribs& a) {
                 flags |= ((h[6] >> 5) & 3) << R3D_SHININESS_SHIFT;
                 if (((h[6] >> 24) & 0x7F) == 2) flags |= R3D_INVERT_RGB;
                 if (h[4] & 0x80) flags |= R3D_TRANSLATOR;
+                // Translucent only because the LOD fades it: still a caster of
+                // traced sun shadows (r3d_raytrace.cpp), as solid as a.shadow.
+                // (As it was, the shadow came all at once as the model finished
+                // fading in, some 100 m away: on the mountain the trees' and
+                // rocks' shadows popped in)
+                if (a.alpha < 1.0f && !poly_alpha && a.shadow > 0)
+                    flags |= R3D_LOD_FADE | uint32_t(std::lround(std::clamp(a.shadow, 0.0f, 1.0f) * 63.0f)) << R3D_LOD_SHADOW_SHIFT;
                 uint32_t own_slot = 0;
                 if (own && textured) {
                     auto pic = own_textures_.find(tex);

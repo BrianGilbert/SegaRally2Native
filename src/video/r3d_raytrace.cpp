@@ -276,7 +276,9 @@ void R3DRayTracer::prepare(const R3DScene& scene, const R3DViewport& world, floa
             // A camera flash (raytrace.glsl's glow_sprite) is a cut-out: the sun's rays pass it
             const uint32_t glow_mask = R3D_TEXTURED | R3D_ALPHA_TEST | R3D_LUMINOUS | R3D_TEX_ALPHA | R3D_SPECULAR;
             bool glow = (flags & glow_mask) == (glow_mask & ~uint32_t(R3D_SPECULAR));
-            if (card || glow || ((flags & R3D_TEXTURED) && (flags & (R3D_ALPHA_TEST | R3D_TEX_ALPHA)) && !actor)) {
+            // Fading by LOD (R3D_LOD_FADE): partly solid, a cut-out (raytrace.glsl cutout_solid)
+            bool fading = (flags & R3D_LOD_FADE) && !actor;
+            if (card || glow || fading || ((flags & R3D_TEXTURED) && (flags & (R3D_ALPHA_TEST | R3D_TEX_ALPHA)) && !actor)) {
                 l.cut_pos.insert(l.cut_pos.end(), p, p + 9);
                 l.cut_data.push_back(c);
             } else {
@@ -284,13 +286,20 @@ void R3DRayTracer::prepare(const R3DScene& scene, const R3DViewport& world, floa
                 l.solid_data.push_back(c);
             }
         };
-        // The solid polygons, and the cars' see-through textured ones (their glass)
+        // The solid polygons, the cars' see-through textured ones (their
+        // glass), and what the game's LOD is fading in or out (R3D_LOD_FADE).
+        // SR2_LOD_SHADOWS=0: not the last, as before (their shadows popped in)
+        static const bool lod_shadows = !(getenv("SR2_LOD_SHADOWS") && atoi(getenv("SR2_LOD_SHADOWS")) == 0);
         for (int pass = 0; pass < 2; pass++) {
             size_t first = pass ? vp.trans_first : vp.opaque_first;
             size_t end = std::min<size_t>(first + (pass ? vp.trans_count : vp.opaque_count), scene.vertices.size());
             for (size_t i = first; i + 2 < end; i += 3) {
                 const R3DVertex* v = &scene.vertices[i];
-                if (pass && (!(v[0].flags & (R3D_ACTOR | R3D_CAR)) || !(v[0].flags & R3D_TEXTURED))) continue;
+                if (pass) {
+                    bool glass = (v[0].flags & (R3D_ACTOR | R3D_CAR)) && (v[0].flags & R3D_TEXTURED);
+                    bool fading = lod_shadows && (v[0].flags & R3D_LOD_FADE) && !(v[0].flags & (R3D_ACTOR | R3D_CAR));
+                    if (!glass && !fading) continue;
+                }
                 add(v, true);
             }
         }
