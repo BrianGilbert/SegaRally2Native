@@ -1053,9 +1053,13 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
         }
     }
     // The world's back faces (R3DScene::backs: left out of the picture by the
-    // back-face test, but the sun's rays still meet them, r3d_raytrace.cpp):
-    // the scenery stands still, so each is where the camera's move puts it
-    // last frame; the rest (cars, people) keep this frame's place
+    // back-face test, but the sun's rays still meet them, r3d_raytrace.cpp).
+    // A corner shared with a polygon facing the camera moves exactly as that
+    // one's does: moved on their own, the edges between both opened by a few
+    // centimetres between frames, and the sun shone through the seams (white
+    // lines that flickered between the chunks of a cliff's shadow). The other
+    // corners of the scenery, which stands still, go where the camera's move
+    // puts them last frame; those of cars and people keep this frame's place
     for (R3DVertex& v : out.backs) memcpy(v.prev, v.pos, sizeof(v.prev));
     if (wv && prev_world_valid_) {
         const float *ax = wv->world_axes, *cam = wv->camera, *pax = prev_world_axes_, *pcam = prev_world_camera_;
@@ -1063,12 +1067,28 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
         float d[3] = {cam[0] - pcam[0], cam[1] - pcam[1], cam[2] - pcam[2]};
         bool cut = dot3(d, d) > 10.0f * 10.0f || dot3(ax + 6, pax + 6) < 0.9f || dot3(ax + 3, pax + 3) < 0.9f;
         size_t end = std::min<size_t>(size_t(wv->back_first) + wv->back_count, out.backs.size());
-        for (size_t i = wv->back_first; !cut && i < end; i++) {
-            R3DVertex& v = out.backs[i];
-            if (v.flags & (R3D_ACTOR | R3D_CAR)) continue;
-            float w[3];
-            for (int k = 0; k < 3; k++) w[k] = cam[k] + dot3(ax + k * 3, v.pos) - pcam[k];
-            for (int k = 0; k < 3; k++) v.prev[k] = w[0] * pax[k] + w[1] * pax[3 + k] + w[2] * pax[6 + k];
+        if (!cut && end > wv->back_first) {
+            auto bits = [](const float* p) {
+                uint32_t b[3];
+                memcpy(b, p, 12);
+                return (uint64_t(b[0]) * 0x9E3779B97F4A7C15ull) ^ (uint64_t(b[1]) * 0xC2B2AE3D27D4EB4Full) ^ (uint64_t(b[2]) * 0x165667B19E3779F9ull);
+            };
+            std::unordered_map<uint64_t, uint32_t> front;   // a corner's position -> a vertex facing the camera there
+            front.reserve(size_t(wv->opaque_count) + wv->trans_count);
+            for (auto [first, count] : {std::pair{wv->opaque_first, wv->opaque_count}, std::pair{wv->trans_first, wv->trans_count}})
+                for (uint32_t i = first; i < first + count && i < out.vertices.size(); i++) front.emplace(bits(out.vertices[i].pos), i);
+            for (size_t i = wv->back_first; i < end; i++) {
+                R3DVertex& v = out.backs[i];
+                auto f = front.find(bits(v.pos));
+                if (f != front.end() && memcmp(out.vertices[f->second].pos, v.pos, 12) == 0) {
+                    memcpy(v.prev, out.vertices[f->second].prev, sizeof(v.prev));
+                    continue;
+                }
+                if (v.flags & (R3D_ACTOR | R3D_CAR)) continue;
+                float w[3];
+                for (int k = 0; k < 3; k++) w[k] = cam[k] + dot3(ax + k * 3, v.pos) - pcam[k];
+                for (int k = 0; k < 3; k++) v.prev[k] = w[0] * pax[k] + w[1] * pax[3 + k] + w[2] * pax[6 + k];
+            }
         }
     }
     prev_world_valid_ = wv != nullptr;
