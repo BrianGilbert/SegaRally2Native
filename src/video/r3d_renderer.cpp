@@ -76,6 +76,16 @@ float shadow_caster_height() {
     static const float h = getenv("SR2_SHADOW_HEIGHT") ? float(atof(getenv("SR2_SHADOW_HEIGHT"))) : 300.0f;
     return h;
 }
+// The shadow map's casters include the world's polygons turned away from the
+// camera (R3DScene::backs), as the traced shadows' do: left out, about half
+// the scenery cast no shadow, and as the camera turned the hills' and
+// cliffs' sides came and went, their shadows sweeping over the road in
+// chunks (GitHub issue #131). Uploaded after the scene's vertices.
+// SR2_SHADOWMAP_BACKS=0: as before
+bool shadowmap_backs() {
+    static const bool on = !(getenv("SR2_SHADOWMAP_BACKS") && atoi(getenv("SR2_SHADOWMAP_BACKS")) == 0);
+    return on;
+}
 // The 3D pass's depth, with a stencil for the cars' patch (blob_)
 constexpr VkFormat DEPTH_STENCIL = VK_FORMAT_D32_SFLOAT_S8_UINT;
 
@@ -1401,13 +1411,17 @@ void R3DRenderer::record_uploads(const Frame& f) {
         transition(cmd, sky_coords_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         layers_dirty_ = false;
     }
-    size_t total = vcount;
+    const size_t nbacks = vcount && shadowmap_backs() ? scene_->backs.size() : 0;
+    size_t total = vcount + nbacks;
     if (total * sizeof(R3DVertex) > vertices_.size) {
         vkDeviceWaitIdle(dev_);
         destroy_buffer(vertices_);
         create_buffer(vertices_, total * sizeof(R3DVertex) * 2, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     }
     if (vcount) memcpy(vertices_.mapped, scene_->vertices.data(), vcount * sizeof(R3DVertex));
+    if (nbacks)
+        memcpy(static_cast<R3DVertex*>(vertices_.mapped) + vcount, scene_->backs.data(), nbacks * sizeof(R3DVertex));
+    backs_uploaded_ = nbacks;
 }
 
 // Global illumination: the rays for every pixel of the half-size image (16
@@ -1507,6 +1521,9 @@ void R3DRenderer::record_shadows(const Frame& f) {
             vkCmdPushConstants(cmd, r3d_layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                sizeof(pc), &pc);
             vkCmdDraw(cmd, v.opaque_count, 1, v.opaque_first, 0);
+            // (the world's back faces too: shadowmap_backs)
+            if (v.world && v.back_count && size_t(v.back_first) + v.back_count <= backs_uploaded_)
+                vkCmdDraw(cmd, v.back_count, 1, uint32_t(vcount + v.back_first), 0);
         }
         vkCmdEndRendering(cmd);
         transition(cmd, shadow_map_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
