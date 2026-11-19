@@ -527,9 +527,14 @@ int main(int argc, char** argv) {
     pack.init("textures", g_opt.dump_textures ? "out/textures" : "", "save/clean_textures");
     pack.set_max_slots(renderer.texture_slots());
     // HD LIVERIES off (classic_liveries): the cars keep the ROM's own textures;
-    // the pack stays loaded so the option changes during a race (dumping keeps it on)
-    auto liveries_pack = [&]() -> TexturePack* { return g_opt.classic_liveries && !g_opt.dump_textures ? nullptr : &pack; };
-    builder.set_texture_pack(liveries_pack(), &g_texture_ram);
+    // the pack stays loaded so the option changes during a race (dumping keeps it on).
+    // With the sun shadows, FOREST's road without the shadows painted into it (texture_pack.h)
+    auto texture_pack = [&]() -> TexturePack* {
+        pack.set_use_files(!g_opt.classic_liveries || g_opt.dump_textures);
+        pack.set_unpaint_shadows(g_opt.shadows);
+        return &pack;
+    };
+    builder.set_texture_pack(texture_pack(), &g_texture_ram);
     // 2D replacements: the foreground (GPU slots 1-191, textures/2d has 59
     // pictures) and the layers below the 3D image (192-247; the backdrops of
     // SkyPack use 248-255). More pictures than slots reuse the oldest (pack2d.h)
@@ -987,7 +992,7 @@ int main(int argc, char** argv) {
                 double from = qpc_seconds();
                 builder.set_fov_widened(g_wide_applied);
                 builder.set_hide_blob_shadows(g_opt.shadows && g_opt.ray_tracing >= 1 && renderer.ray_tracing_available());
-                builder.set_texture_pack(liveries_pack(), &g_texture_ram);
+                builder.set_texture_pack(texture_pack(), &g_texture_ram);
                 builder.set_view_wide(g_opt.max_aspect > 4.0f / 3.0f + 0.01f ? std::max(1.0f, g_wide_view.load()) : 1.0f);
                 builder.build(*state, p->scene);
                 double built_at = qpc_seconds();
@@ -1717,7 +1722,7 @@ int main(int argc, char** argv) {
                 std::lock_guard<std::mutex> lock(prep_mutex);
                 builder.set_fov_widened(g_wide_applied);
                 builder.set_hide_blob_shadows(g_opt.shadows && g_opt.ray_tracing >= 1 && renderer.ray_tracing_available());
-                builder.set_texture_pack(liveries_pack(), &g_texture_ram);
+                builder.set_texture_pack(texture_pack(), &g_texture_ram);
                 builder.set_view_wide(g_opt.max_aspect > 4.0f / 3.0f + 0.01f ? std::max(1.0f, g_wide_view.load()) : 1.0f);
                 builder.build(*next_state, own_scene);
                 auto images = pack.take_new_images();
