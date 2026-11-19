@@ -143,17 +143,9 @@ void pad_rumble_frame(float arcade, bool attract) {
         if (air >= 6) hit_now = std::max(hit_now, std::clamp(float(air) / 40.0f, 0.3f, 1.0f));
         air = 0;
     }
-    // Crashes: the game's are soft (Sergi's deliberate ones: 15-28 m/s lost
-    // over a few tenths, never a big jump in one frame), so a crash is the
-    // car losing speed fast with the brake up: over 6 m/s in 0.25 s (15
-    // frames) without braking, the full kick from 12. (Hard braking in the
-    // hairpins loses up to ~11 m/s in 0.25 s, but with the brake down)
-    if (s.frames >= 16) {
-        const float lost = s.hspeed[(s.frames + 1) & 15] - speed;   // 15 frames ago
-        const float brake_now = std::clamp(float(g_inputs.brake) / 255.0f, 0.0f, 1.0f);
-        if (brake_now < 0.25f && !g_inputs.handbrake)
-            hit_now = std::max(hit_now, std::clamp((lost - 6.0f) / 6.0f, 0.0f, 1.0f));
-    }
+    // (Crashes: the game's are soft, 15-28 m/s lost over a few tenths with
+    // no jump in one frame; a speed-loss rule did not feel right to Sergi, so
+    // for now only the big jolts above and the landings kick)
     // (held ~0.5 s, so a crash is told apart from the gravel's buzz)
     s.hit = std::max(hit_now, s.hit * 0.94f);
 
