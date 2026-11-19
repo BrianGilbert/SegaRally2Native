@@ -119,6 +119,8 @@ const std::vector<Entry>& table() {
                [](Options& o, const char* v) { o.gi = strcmp(v, "off") == 0 || strcmp(v, "0") == 0 ? 0 : 1; }),
         custom("--no-gi", nullptr, "no global illumination (as --gi off)", false, [](Options& o, const char*) { o.gi = 0; }),
         off("--classic-dust", &Options::dust, "the arcade's flat fans of dust behind the wheels, no particles"),
+        num("--object-distance", &Options::object_distance,
+            "metres ahead the spectators, cameramen, signs... appear from (250; 100 = original)"),
         off("--no-sharpen", &Options::sharpen, "no adaptive sharpening of the 3D image"),
         off("--no-interp", &Options::interp, "game frames as they are, not interpolated"),
         flag("--letterbox", &Options::letterbox, "keep the black bars of the cutscenes"),

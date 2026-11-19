@@ -184,6 +184,7 @@ void FrontendSettings::load(const char* path, const char* section) {
         // (on or off: a "high" saved before that level was dropped turns into on)
         else if (k == "global_illumination") gi = v == "off" || v == "0" ? 0 : 1;
         else if (k == "dust") dust = v != "original" && v != "0";
+        else if (k == "object_distance") object_distance = std::clamp((atoi(value) + 25) / 50 * 50, 100, 250);
         else if (k == "sharpen") sharpen = on;
         else if (k == "hd_hud" || k == "hd_text") hd_hud = on;
         else if (k == "hd_liveries") hd_liveries = on;
@@ -233,7 +234,7 @@ std::string FrontendSettings::text(bool section) const {
         snprintf(buf, sizeof(buf), "check_updates = %d\nnews_seen = %d\n", check_updates, news_seen);
         out += buf;
     }
-    snprintf(buf, sizeof(buf), "rt_reflections = %d\nglobal_illumination = %s\ndust = %s\ndifficulty = %s\nhd_liveries = %d\ntrigger_rumble = %d\n", reflections, gi ? "low" : "off", dust ? "enhanced" : "original", DIFFICULTY_KEYS[std::clamp(difficulty, 0, 4)], hd_liveries, trigger_rumble);
+    snprintf(buf, sizeof(buf), "rt_reflections = %d\nglobal_illumination = %s\ndust = %s\ndifficulty = %s\nhd_liveries = %d\ntrigger_rumble = %d\nobject_distance = %d\n", reflections, gi ? "low" : "off", dust ? "enhanced" : "original", DIFFICULTY_KEYS[std::clamp(difficulty, 0, 4)], hd_liveries, trigger_rumble, object_distance);
     out += buf;
     static const char* const ASPECTS[5] = {"auto", "32:9", "21:9", "16:9", "4:3"};
     snprintf(buf, sizeof(buf), "aspect = %s\ngame_mode = %s\ndefault_view = %s\nspeed = %s\nfree_play = %d\n",
@@ -266,6 +267,7 @@ void FrontendSettings::arcade_base() {
     reflections = false;
     gi = 0;
     dust = false;
+    object_distance = 100;                // the spectators appear 100 m ahead, as on the cabinet
     sun = shadows = hdr = ao = haze = soft = sharpen = false;
     bloom = 0;
     saturation = gamma = 100;
@@ -385,6 +387,7 @@ const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_SUN, LIGHTING_TAB, L"LIGHTING"}, {OPT_SHADOWS, LIGHTING_TAB}, {OPT_HDR, LIGHTING_TAB}, {OPT_AO, LIGHTING_TAB},
     {OPT_BLOOM, LIGHTING_TAB}, {OPT_HAZE, LIGHTING_TAB},
     {OPT_RT, LIGHTING_TAB, L"RAY TRACING"}, {OPT_REFLECT, LIGHTING_TAB}, {OPT_GI, LIGHTING_TAB},
+    {OPT_OBJECTS, LIGHTING_TAB, L"WORLD"},
     {OPT_DUST, LIGHTING_TAB, L"ARCADE ART"}, {OPT_HUD, LIGHTING_TAB}, {OPT_LIVERIES, LIGHTING_TAB},
     {OPT_VOLUME, AUDIO_TAB, L"VOLUME"}, {OPT_MUSIC, AUDIO_TAB}, {OPT_MENU_MUSIC, AUDIO_TAB},
     {OPT_SPEAKERS, AUDIO_TAB, L"SOUND"}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
@@ -615,6 +618,10 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {OPT_DUST, L"DUST", settings.dust ? L"ENHANCED" : L"ORIGINAL",
                  settings.dust ? L"Clouds of dust that billow and hang over the road, and stones thrown up by the wheels"
                                : L"The arcade's own flat fans of dust behind the wheels"},
+                {OPT_OBJECTS, L"OBJECT DISTANCE", std::to_wstring(settings.object_distance) + L" M",
+                 settings.object_distance <= 100
+                     ? L"Spectators, cameramen, signs and cones appear 100 m ahead, as in the arcade"
+                     : L"How far ahead the spectators, cameramen, signs and cones appear (100 M = original)"},
                 {OPT_SAT, L"COLOR SATURATION", std::to_wstring(settings.saturation) + L"%",
                  L"How vivid the colours are (100% = original)"},
                 {OPT_GAMMA, L"GAMMA", gamma_text, L"Brightness of the mid-tones (1.00 = original)"},
@@ -876,6 +883,10 @@ void Frontend::activate(const Item& it, int dir) {
     case OPT_REFLECT: settings.reflections = !settings.reflections; push(Action::SettingsChanged); break;
     case OPT_GI: settings.gi = settings.gi ? 0 : 1; push(Action::SettingsChanged); break;
     case OPT_DUST: settings.dust = !settings.dust; push(Action::SettingsChanged); break;
+    case OPT_OBJECTS:   // 100..250 m in steps of 50; past either end it starts again from the other
+        settings.object_distance = 100 + (settings.object_distance - 100 + 50 * dir + 200) % 200;
+        push(Action::SettingsChanged);
+        break;
     case OPT_SHARPEN: settings.sharpen = !settings.sharpen; push(Action::SettingsChanged); break;
     case OPT_HUD: settings.hd_hud = !settings.hd_hud; push(Action::SettingsChanged); break;
     case OPT_LIVERIES: settings.hd_liveries = !settings.hd_liveries; push(Action::SettingsChanged); break;

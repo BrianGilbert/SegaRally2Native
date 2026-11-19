@@ -1275,6 +1275,7 @@ int main(int argc, char** argv) {
                     renderer.set_reflections(g_opt.reflections = s.reflections);
                     renderer.set_global_illumination(g_opt.gi = s.gi);
                     r3d_set_sr2_dust(g_opt.dust = s.dust);
+                    g_opt.object_distance = s.object_distance;   // the game thread's next frame (game_hooks.cpp)
                     renderer.set_sharpen((g_opt.sharpen = s.sharpen) ? 0.5f : 0.0f);
                     if (g_opt.classic_hud != !s.hd_hud) {
                         g_opt.classic_hud = !s.hd_hud;

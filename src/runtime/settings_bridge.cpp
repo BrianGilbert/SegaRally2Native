@@ -27,6 +27,7 @@ void options_from_settings(Options& o, const FrontendSettings& ini) {
     o.reflections = ini.reflections;
     o.gi = ini.gi;
     o.dust = ini.dust;
+    o.object_distance = ini.object_distance;
     o.sharpen = ini.sharpen;
     o.classic_hud = !ini.hd_hud;
     o.classic_liveries = !ini.hd_liveries;
@@ -70,6 +71,7 @@ void settings_from_options(FrontendSettings& s, const Options& o) {
     s.reflections = o.reflections;
     s.gi = o.gi;
     s.dust = o.dust;
+    s.object_distance = std::clamp((o.object_distance + 25) / 50 * 50, 100, 250);
     s.sharpen = o.sharpen;
     s.hd_hud = !o.classic_hud;
     s.hd_liveries = !o.classic_liveries;

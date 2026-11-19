@@ -87,3 +87,9 @@ _set([0x3E514], ["c.r[0] = sr2_course_sound(c.r[31] + 4);"])           # lwz r0,
 _set([0x3E524], ["c.r[3] = sr2_course_sound(c.r[30] + c.r[29]);"])     # lwzx r3, r30, r29
 _set([0x3E570], ["c.r[3] = sr2_course_sound(c.r[9] + c.r[0]);"])       # lwzx r3, r9, r0
 _set([0x3E5B0], ["c.r[3] = sr2_course_sound(c.r[9] + 4);"])            # lwz r3, 4(r9)
+
+# OBJECT DISTANCE: the course's placed objects (spectators, cameramen, signs,
+# cones...) are put in the scene only within 100 m ahead of the camera
+# (0x5D784, lfs f0 of 0xF54D0); out of the race, the kind-4 ones within 100 m
+# (0x5D888, lfs f0 of 0xF54DC). Both take the option (game_hooks.cpp)
+_set([0x5D7EC, 0x5D96C], ["c.f[0].d = sr2_object_distance();"])
