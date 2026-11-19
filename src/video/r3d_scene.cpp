@@ -327,7 +327,7 @@ void R3DSceneBuilder::settle_player_car(R3DScene& out) {
         return ground > -1e29f;
     };
     // This frame's measure
-    float raw = -1;
+    float raw = -1, patch_gap = 1;   // patch_gap: the patch over the road (its middle), when measured
     std::vector<float> gaps;
     for (size_t i = 0; i < patches.size(); i += 3) {
         const float* p = vs[patches[i]].pos;
@@ -336,7 +336,7 @@ void R3DSceneBuilder::settle_player_car(R3DScene& out) {
     }
     if (gaps.size() >= 8) {
         std::nth_element(gaps.begin(), gaps.begin() + gaps.size() / 2, gaps.end());
-        raw = gaps[gaps.size() / 2];
+        raw = patch_gap = gaps[gaps.size() / 2];
     } else if (count >= 90) {
         // No patch: the game lays none under the cars farther away (some 40 m
         // on), which hover all the same, and over a road drawn with less
@@ -431,8 +431,14 @@ void R3DSceneBuilder::settle_player_car(R3DScene& out) {
     // patch down already (at the desert's start a held lift pushed it under
     // the road for half a second)
     float patch_down = measured ? std::min(down, raw) : down;
+    // FOREST: over some bumps its road is drawn up to some 20 cm above the
+    // ground the game lays the patch on, for a few frames at a time (Sergi's
+    // carlog: the middle 22 cm under the road); the patch was under the road
+    // and the shadow went out. There it is raised to 3 cm over the road (only
+    // on FOREST, the other courses as they were)
+    if (forest_ && patch_gap < 0 && patch_gap > -0.5f) patch_down = patch_gap;
     for (uint32_t k : patches) {
-        if (patch_down > 0.03f) lower(vs[k], patch_down - 0.03f);
+        if (patch_down > 0.03f || patch_down < 0) lower(vs[k], patch_down - 0.03f);
         set_down.insert(k);
     }
     };
