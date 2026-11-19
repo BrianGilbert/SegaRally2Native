@@ -853,7 +853,8 @@ void Frontend::activate(const Item& it, int dir) {
     case OPT_REAR: settings.rear_boost = (settings.rear_boost + 3 * dir + 15) % 15; push(Action::SettingsChanged); break;
     case OPT_SAMPLES: settings.cubic_samples = !settings.cubic_samples; push(Action::SettingsChanged); break;
     case OPT_AA: {   // OFF, FXAA, MSAA, DLAA, DLSS QUALITY, BALANCED, PERFORMANCE, ULTRA PERFORMANCE
-        // (DLAA and DLSS only on a card that can run them, dlss_available)
+        // (DLAA and DLSS only on a card that can run them, dlss_available; FXAA
+        // only on one that cannot: with DLSS there it would only be worse and slower)
         static const int ORDER[8] = {2, 7, 0, 1, 3, 4, 5, 6};
         int at = 0;
         for (int i = 0; i < 8; i++)
@@ -861,7 +862,7 @@ void Frontend::activate(const Item& it, int dir) {
         for (int n = 0; n < 8; n++) {
             at = (at + dir + 8) % 8;
             bool nvidia_only = ORDER[at] == 1 || (ORDER[at] >= 3 && ORDER[at] <= 6);
-            if (dlss_available || !nvidia_only) break;
+            if (dlss_available ? ORDER[at] != 7 : !nvidia_only) break;
         }
         settings.aa = ORDER[at];
         push(Action::SettingsChanged);
