@@ -202,6 +202,36 @@ void R3DRayTracer::prepare(const R3DScene& scene, const R3DViewport& world, floa
         bool car = vp.opaque_count > 0 && vp.opaque_first < scene.vertices.size() &&
                    (scene.vertices[vp.opaque_first].flags & R3D_CAR);
         if (&vp != &world && !car) continue;
+        // The scenery's solid polygons, a little wider for the rays: its
+        // pieces meet at edges that are not quite closed (corners of separate
+        // models a hair apart, more so while the camera turns and each moves
+        // between frames on its own), and the sun shone through the cracks,
+        // white lines flickering between the chunks of a cliff's shadow. Each
+        // edge moves out by a few centimetres, a little more far off; less
+        // than the rays' own lift off the surface (r3d.frag sun_rays), so
+        // nothing shades itself. SR2_RT_SEAL=0: as before
+        static const float seal = getenv("SR2_RT_SEAL") ? float(atof(getenv("SR2_RT_SEAL"))) : 1.0f;
+        auto widen = [&](float* p) {
+            float q[9];
+            for (int k = 0; k < 3; k++) {
+                const float *a = p + k * 3, *b = p + ((k + 1) % 3) * 3, *c = p + ((k + 2) % 3) * 3;
+                float u[3], w[3];
+                for (int i = 0; i < 3; i++) u[i] = b[i] - a[i], w[i] = c[i] - a[i];
+                float lu = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+                float lw = std::sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+                if (lu < 1e-5f || lw < 1e-5f) return;
+                float in[3], half[3];
+                for (int i = 0; i < 3; i++) u[i] /= lu, w[i] /= lw, in[i] = u[i] + w[i], half[i] = u[i] - w[i];
+                float li = std::sqrt(in[0] * in[0] + in[1] * in[1] + in[2] * in[2]);
+                if (li < 1e-5f) return;
+                // sin of half the corner's angle: the corner moves e / that for each edge to move e
+                float s = 0.5f * std::sqrt(half[0] * half[0] + half[1] * half[1] + half[2] * half[2]);
+                float dist = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+                float e = seal * (0.03f + 0.001f * dist) / std::max(s, 0.25f);
+                for (int i = 0; i < 3; i++) q[k * 3 + i] = a[i] - in[i] / li * e;
+            }
+            memcpy(p, q, sizeof(q));
+        };
         auto add = [&](const R3DVertex* v, bool moves) {
             float p[9], lowest = 1e30f;
             for (int k = 0; k < 3; k++) {
@@ -282,6 +312,7 @@ void R3DRayTracer::prepare(const R3DScene& scene, const R3DViewport& world, floa
                 l.cut_pos.insert(l.cut_pos.end(), p, p + 9);
                 l.cut_data.push_back(c);
             } else {
+                if (!actor && seal > 0) widen(p);
                 l.solid_pos.insert(l.solid_pos.end(), p, p + 9);
                 l.solid_data.push_back(c);
             }

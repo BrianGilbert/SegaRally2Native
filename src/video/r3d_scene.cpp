@@ -1073,10 +1073,23 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
                 memcpy(b, p, 12);
                 return (uint64_t(b[0]) * 0x9E3779B97F4A7C15ull) ^ (uint64_t(b[1]) * 0xC2B2AE3D27D4EB4Full) ^ (uint64_t(b[2]) * 0x165667B19E3779F9ull);
             };
+            // (and a corner a hair from one facing the camera, of another
+            // model beside it, takes that one's move: on a 5 cm grid)
+            constexpr float CELL = 0.05f;
+            auto cell = [](int64_t x, int64_t y, int64_t z) {
+                return (uint64_t(x) * 0x9E3779B97F4A7C15ull) ^ (uint64_t(y) * 0xC2B2AE3D27D4EB4Full) ^ (uint64_t(z) * 0x165667B19E3779F9ull);
+            };
             std::unordered_map<uint64_t, uint32_t> front;   // a corner's position -> a vertex facing the camera there
+            std::unordered_map<uint64_t, uint32_t> near_front;   // a grid cell -> one there
             front.reserve(size_t(wv->opaque_count) + wv->trans_count);
+            near_front.reserve(size_t(wv->opaque_count) + wv->trans_count);
             for (auto [first, count] : {std::pair{wv->opaque_first, wv->opaque_count}, std::pair{wv->trans_first, wv->trans_count}})
-                for (uint32_t i = first; i < first + count && i < out.vertices.size(); i++) front.emplace(bits(out.vertices[i].pos), i);
+                for (uint32_t i = first; i < first + count && i < out.vertices.size(); i++) {
+                    const float* q = out.vertices[i].pos;
+                    front.emplace(bits(q), i);
+                    if (out.vertices[i].flags & (R3D_ACTOR | R3D_CAR)) continue;
+                    near_front.emplace(cell(int64_t(std::floor(q[0] / CELL)), int64_t(std::floor(q[1] / CELL)), int64_t(std::floor(q[2] / CELL))), i);
+                }
             for (size_t i = wv->back_first; i < end; i++) {
                 R3DVertex& v = out.backs[i];
                 auto f = front.find(bits(v.pos));
@@ -1085,6 +1098,23 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
                     continue;
                 }
                 if (v.flags & (R3D_ACTOR | R3D_CAR)) continue;
+                int64_t c[3] = {int64_t(std::floor(v.pos[0] / CELL)), int64_t(std::floor(v.pos[1] / CELL)), int64_t(std::floor(v.pos[2] / CELL))};
+                const R3DVertex* best = nullptr;
+                float best_d = CELL * CELL;
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dz = -1; dz <= 1; dz++) {
+                            auto n = near_front.find(cell(c[0] + dx, c[1] + dy, c[2] + dz));
+                            if (n == near_front.end()) continue;
+                            const R3DVertex& o = out.vertices[n->second];
+                            float e[3] = {o.pos[0] - v.pos[0], o.pos[1] - v.pos[1], o.pos[2] - v.pos[2]};
+                            float d = dot3(e, e);
+                            if (d < best_d) best_d = d, best = &o;
+                        }
+                if (best) {
+                    for (int k = 0; k < 3; k++) v.prev[k] = v.pos[k] - (best->pos[k] - best->prev[k]);
+                    continue;
+                }
                 float w[3];
                 for (int k = 0; k < 3; k++) w[k] = cam[k] + dot3(ax + k * 3, v.pos) - pcam[k];
                 for (int k = 0; k < 3; k++) v.prev[k] = w[0] * pax[k] + w[1] * pax[3 + k] + w[2] * pax[6 + k];
