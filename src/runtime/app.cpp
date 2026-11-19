@@ -322,7 +322,8 @@ int main(int argc, char** argv) {
             printf("[experience] ARCADE ORIGINAL\n");
         } else other_ini = arcade_ini;
         aa_auto = !ini.aa_saved && nvidia_card();
-        if (aa_auto) ini.aa = 1;   // DLAA; DLSS QUALITY or MSAA once the screen and the GPU are known
+        if (aa_auto) ini.aa = 1;   // DLAA; DLSS QUALITY or FXAA once the screen and the GPU are known
+        else if (!ini.aa_saved) ini.aa = 7;   // no DLSS on other cards: FXAA, cheap (MSAA 4x cost old cards a lot)
         options_from_settings(g_opt, ini);
         g_pad_rumble = ini.vibration;
         g_trigger_share = ini.trigger_rumble / 100.0f;
@@ -478,6 +479,10 @@ int main(int argc, char** argv) {
                     "Sega Rally 2 Native", MB_OK | MB_ICONERROR);
         return 1;
     }
+    // DLAA or DLSS asked for on a card without them (not an RTX): FXAA instead
+    const bool dlss_failed = g_opt.dlaa && !renderer.dlaa_active();
+    if (dlss_failed) g_opt.dlaa = false, g_opt.dlss = 0, g_opt.fxaa = true, g_opt.msaa = 1;
+    renderer.set_fxaa(g_opt.fxaa);
     renderer.set_max_aspect(g_opt.max_aspect);
     renderer.set_pixel_aspect(g_opt.pixel_aspect);
     // The 2D layers: xBR smoothing with the HD HUD, the ROM's own pixels without it
@@ -498,11 +503,10 @@ int main(int argc, char** argv) {
     renderer.set_sharpen(g_opt.sharpen ? 0.5f : 0.0f);
     if (g_opt.haze > 0) printf("[video] distance haze on (strength %.2f)\n", g_opt.haze);
     if (aa_auto) {   // what the first run got: the menu shows it, and saves it with the first setting changed
-        if (!renderer.dlaa_active()) g_opt.dlaa = false, g_opt.dlss = 0;
-        ini.aa = g_opt.dlss ? 2 + g_opt.dlss : g_opt.dlaa ? 1 : 0;
+        ini.aa = g_opt.dlss ? 2 + g_opt.dlss : g_opt.dlaa ? 1 : g_opt.fxaa ? 7 : 0;
         printf("[video] first run: anti-aliasing chosen for this GPU and screen\n");
     }
-    if (g_opt.dlaa && !renderer.dlaa_active()) printf("[video] DLAA not available: using MSAA\n");
+    if (dlss_failed) printf("[video] DLAA/DLSS not available on %s: using FXAA\n", presenter.device_name().c_str());
     if (renderer.dlaa_active())
         printf("[video] antialiasing NVIDIA %s, anisotropic filtering %dx%s\n",
                !renderer.dlss_upscaling() ? "DLAA"
@@ -511,6 +515,9 @@ int main(int argc, char** argv) {
                : g_opt.dlss == 4          ? "DLSS ULTRA PERFORMANCE"
                                           : "DLSS QUALITY",
                g_opt.aniso,
+               g_opt.aniso > 0 ? " with mipmaps" : " (no mipmaps)");
+    else if (renderer.fxaa())
+        printf("[video] antialiasing FXAA, anisotropic filtering %dx%s\n", g_opt.aniso,
                g_opt.aniso > 0 ? " with mipmaps" : " (no mipmaps)");
     else
         printf("[video] antialiasing MSAA %dx, anisotropic filtering %dx%s\n", renderer.msaa_samples(), g_opt.aniso,
@@ -680,6 +687,8 @@ int main(int argc, char** argv) {
         g_other_settings = &frontend.other;
         frontend.aa_at_launch = s.aa;
         frontend.rt_available = renderer.ray_tracing_available();
+        // DLAA and DLSS in the menu only on a card that runs them (an RTX)
+        frontend.dlss_available = renderer.dlaa_active() || (!dlss_failed && strstr(presenter.device_name().c_str(), "RTX"));
         frontend.resolutions = presenter.display_modes();
         if (s.res_w > 0 && !frontend.resolutions.empty()) {   // a size that is not one of the monitor's modes: the nearest
             auto best = frontend.resolutions[0];

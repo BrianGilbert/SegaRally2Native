@@ -198,6 +198,9 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
         printf("[dlaa] mode %d (3D %.0f%% of the size), preset %c (%s, FP8 %s), %u jitter phases\n", mode,
                100.0f / upscale_, char('A' + dlss_preset_ - 1), dlss_model ? "chosen" : "auto", fp8 ? "yes" : "no",
                jitter_phases_);
+    } else if (dlaa) {   // no DLSS on this card (not an RTX, or no NGX): FXAA, far cheaper than MSAA on an old card
+        msaa = 1;
+        fxaa_ = true;
     }
     // Highest supported MSAA level not above the requested one
     VkPhysicalDeviceProperties props;
@@ -1952,7 +1955,7 @@ R3DRenderer::ComposePush R3DRenderer::compose_push(const Frame& f) const {
     const bool sr2_on = sr2_hud_on();
     ComposePush pc{.scale = {lay.view_w * lay.scale * lay.px_aspect / W, SCREEN_H * lay.scale / H},
                    .offset = {lay.ox / W, lay.oy / H},
-                   .sharpen = {sharpen_, 0},
+                   .sharpen = {sharpen_, fxaa() ? 1.0f : 0.0f},
                    .window = {W, H},
                    .layer2d = {lay.game_x0 / lay.view_w, SCREEN_W / lay.view_w},
                    .filter2d = {smooth_2d_ ? 1.0f : 0.0f, lay.scale},
