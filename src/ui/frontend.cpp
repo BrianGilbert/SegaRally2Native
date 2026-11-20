@@ -383,6 +383,7 @@ const wchar_t* const Frontend::TAB_NAMES[Frontend::TAB_COUNT] = {L"EXPERIENCE", 
 // camera flashes). A tab whose rows do not fit the page scrolls.
 const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_EXPERIENCE, EXPERIENCE_TAB, L"EDITION"}, {OPT_ARCADE_ASPECT, EXPERIENCE_TAB},
+    {OPT_TELEMETRY, EXPERIENCE_TAB, L"EXPERIMENTAL"},
     {OPT_DISPLAY, DISPLAY_TAB, L"SCREEN"}, {OPT_RESOLUTION, DISPLAY_TAB}, {OPT_ASPECT, DISPLAY_TAB}, {OPT_SCALE, DISPLAY_TAB}, {OPT_MOTION, DISPLAY_TAB},
     {OPT_VSYNC, DISPLAY_TAB}, {OPT_MAXFPS, DISPLAY_TAB}, {OPT_BGFPS, DISPLAY_TAB}, {OPT_AA, DISPLAY_TAB},
     {OPT_SAT, DISPLAY_TAB, L"PICTURE"}, {OPT_GAMMA, DISPLAY_TAB}, {OPT_SHARPEN, DISPLAY_TAB},
@@ -633,6 +634,9 @@ std::vector<Frontend::Item> Frontend::items() const {
                  L"Brings back texture detail after the edge smoothing, without halos"},
                 {OPT_UPDATES, L"CHECK FOR UPDATES", on_off(settings.check_updates),
                  L"At launch, look on GitHub for a new version and show what is new in it"},
+                {OPT_TELEMETRY, L"TELEMETRY", on_off(settings.telemetry),
+                 L"Sends the car's speed, RPM, gear and G-forces to SimHub or motion rig software on this PC "
+                 L"(UDP port " + std::to_wstring(settings.telemetry_port) + L", DiRT Rally format). Not tested on a real rig yet"},
                 {OPT_HUD, L"HD HUD", on_off(settings.hd_hud),
                  settings.hd_hud ? L"Redrawn HUD: sharp fonts, rev counters, gear box and co-driver signs"
                                  : L"The arcade's original pixel HUD and screens"},
@@ -851,6 +855,7 @@ void Frontend::activate(const Item& it, int dir) {
         push(Action::SettingsChanged);
         break;
     case OPT_UPDATES: settings.check_updates = !settings.check_updates; push(Action::SettingsChanged); break;
+    case OPT_TELEMETRY: settings.telemetry = !settings.telemetry; push(Action::SettingsChanged); break;
     case OPT_MENU_MUSIC: settings.menu_music = !settings.menu_music; push(Action::SettingsChanged); break;
     case OPT_SPEAKERS: settings.speakers = (settings.speakers + dir + 3) % 3; push(Action::SettingsChanged); break;
     case OPT_REAR: settings.rear_boost = (settings.rear_boost + 3 * dir + 15) % 15; push(Action::SettingsChanged); break;
