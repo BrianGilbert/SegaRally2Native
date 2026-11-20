@@ -563,7 +563,7 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {OPT_ARCADE_ASPECT, L"ASPECT", ASPECTS[std::clamp(arc.aspect, 0, 4)],
                  L"ARCADE ORIGINAL: " + aspect_hint(arc.aspect)},
                 {OPT_ASPECT, L"ASPECT", ASPECTS[std::clamp(settings.aspect, 0, 4)], aspect_hint(settings.aspect)},
-                {OPT_HUD_AREA, L"HUD", settings.aspect == 4 || settings.hud_43 ? L"4:3" : L"WIDE",
+                {OPT_HUD_AREA, L"HUD POSITION", settings.aspect == 4 || settings.hud_43 ? L"4:3" : L"WIDE",
                  settings.aspect == 4 ? std::wstring(L"With ASPECT 4:3 the HUD is always in its original place")
                  : settings.hud_43    ? L"The HUD in its original 4:3 place in the middle, the picture still wide"
                                       : L"The HUD's corners out towards the picture's sides (up to a 16:9 picture's)",
