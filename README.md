@@ -106,6 +106,13 @@ Running slow? In OPTIONS, try these in order:
 - **GRAPHICS > RAY TRACING: OFF**, a big one.
 - **DISPLAY > MAX FPS** lower, or **RENDER SCALE** under 100%.
 
+## Experimental
+
+Untested on real hardware. Feedback welcome in the issues.
+
+- **Telemetry** (OPTIONS > EXPERIENCE > EXPERIMENTAL): sends speed, RPM, gear and G-forces for SimHub or a motion rig.
+  UDP `127.0.0.1:20777`, DiRT Rally format.
+
 ## More
 
 - `SegaRally2.exe --help` lists the command-line options (`--aspect 21:9`, `--hud-centre`...).
