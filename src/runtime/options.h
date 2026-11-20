@@ -42,6 +42,8 @@ struct Options {
                                      // the cabinet's 496x384 on a 4:3 monitor)
     bool pixel_2d = false;           // --pixel2d: 2D layers without xBR upscaling
     bool hud_centre = false;         // --hud-centre: keep the HUD in the 4:3 area (otherwise its corners go out, up to a 16:9 view's edges)
+    bool telemetry = false;          // UDP telemetry for SimHub / motion rigs (settings.ini telemetry = 1; telemetry.h)
+    int telemetry_port = 20777;
     bool trigger_rumble = true;      // --no-trigger-rumble: Xbox pads through XInput, no motors in the triggers
     bool letterbox = false;          // --letterbox: keep the black cutscene bars
     bool classic_hud = false;        // --classic-hud: the ROM's own HUD and screens (pixel letters, no redrawn dials, signs...)
