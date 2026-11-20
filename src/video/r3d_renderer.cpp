@@ -64,6 +64,16 @@ struct AtmosphereUniform {
 // ray tracing were blotchy and thin ones vanished)
 constexpr uint32_t SHADOW_SIZE = 4096;   // shadow map, square
 constexpr float SHADOW_RANGE = 100.0f;   // how far in front of the camera shadows are drawn (view units)
+// The shadow map's casters include the world's polygons turned away from the
+// camera (R3DScene::backs), as the traced shadows' do: left out, about half
+// the scenery cast no shadow, and as the camera turned the hills' and
+// cliffs' sides came and went, their shadows sweeping over the road in
+// chunks (GitHub issue #131). Uploaded after the scene's vertices.
+// SR2_SHADOWMAP_BACKS=0: as before
+bool shadowmap_backs() {
+    static const bool on = !(getenv("SR2_SHADOWMAP_BACKS") && atoi(getenv("SR2_SHADOWMAP_BACKS")) == 0);
+    return on;
+}
 // The 3D pass's depth, with a stencil for the cars' patch (blob_)
 constexpr VkFormat DEPTH_STENCIL = VK_FORMAT_D32_SFLOAT_S8_UINT;
 
@@ -188,6 +198,9 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
         printf("[dlaa] mode %d (3D %.0f%% of the size), preset %c (%s, FP8 %s), %u jitter phases\n", mode,
                100.0f / upscale_, char('A' + dlss_preset_ - 1), dlss_model ? "chosen" : "auto", fp8 ? "yes" : "no",
                jitter_phases_);
+    } else if (dlaa) {   // no DLSS on this card (not an RTX, or no NGX): FXAA, far cheaper than MSAA on an old card
+        msaa = 1;
+        fxaa_ = true;
     }
     // Highest supported MSAA level not above the requested one
     VkPhysicalDeviceProperties props;
@@ -1293,15 +1306,8 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
     (void)tone_read;
     u.soft[3] = tone[0];
     u.sunlight[3] = tone[1];
-    // SUN: more contrast in clear outdoor scenes (sunlit, little of the game's
-    // own fog); the fogged, dark and indoor scenes keep the game's light
-    if (w && sun_ && w->sun_intensity > 0.3f) {
-        float fogged = std::clamp(w->scroll_fog * 2.0f + w->fog_density * 300.0f, 0.0f, 1.0f);
-        float k = 1.0f - fogged;
-        u.sunlight[0] = 1.0f + 0.45f * k;
-        u.sunlight[1] = 1.0f - 0.4f * k;
-        u.sunlight[2] = k;
-    }
+    // SUN: more contrast in clear outdoor scenes (r3d_sun_gains)
+    if (w) u.sunlight[2] = r3d_sun_gains(*w, sun_, u.sunlight[0], u.sunlight[1]);
     u.mirror[3] = reflections_ ? 1.0f : 0.0f;   // r3d.frag: ray traced reflections on the cars
     // The world viewport's spotlight (spec 7.1), applied to the game world
     if (w && w->spot_radius[0] > 0 && w->spot_radius[1] > 0) {
@@ -1389,13 +1395,17 @@ void R3DRenderer::record_uploads(const Frame& f) {
         transition(cmd, sky_coords_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         layers_dirty_ = false;
     }
-    size_t total = vcount;
+    const size_t nbacks = vcount && shadowmap_backs() ? scene_->backs.size() : 0;
+    size_t total = vcount + nbacks;
     if (total * sizeof(R3DVertex) > vertices_.size) {
         vkDeviceWaitIdle(dev_);
         destroy_buffer(vertices_);
         create_buffer(vertices_, total * sizeof(R3DVertex) * 2, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     }
     if (vcount) memcpy(vertices_.mapped, scene_->vertices.data(), vcount * sizeof(R3DVertex));
+    if (nbacks)
+        memcpy(static_cast<R3DVertex*>(vertices_.mapped) + vcount, scene_->backs.data(), nbacks * sizeof(R3DVertex));
+    backs_uploaded_ = nbacks;
 }
 
 // Global illumination: the rays for every pixel of the half-size image (16
@@ -1495,6 +1505,9 @@ void R3DRenderer::record_shadows(const Frame& f) {
             vkCmdPushConstants(cmd, r3d_layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                sizeof(pc), &pc);
             vkCmdDraw(cmd, v.opaque_count, 1, v.opaque_first, 0);
+            // (the world's back faces too: shadowmap_backs)
+            if (v.world && v.back_count && size_t(v.back_first) + v.back_count <= backs_uploaded_)
+                vkCmdDraw(cmd, v.back_count, 1, uint32_t(vcount + v.back_first), 0);
         }
         vkCmdEndRendering(cmd);
         transition(cmd, shadow_map_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -1935,7 +1948,7 @@ R3DRenderer::ComposePush R3DRenderer::compose_push(const Frame& f) const {
     const bool sr2_on = sr2_hud_on();
     ComposePush pc{.scale = {lay.view_w * lay.scale * lay.px_aspect / W, SCREEN_H * lay.scale / H},
                    .offset = {lay.ox / W, lay.oy / H},
-                   .sharpen = {sharpen_, 0},
+                   .sharpen = {sharpen_, fxaa() ? 1.0f : 0.0f},
                    .window = {W, H},
                    .layer2d = {lay.game_x0 / lay.view_w, SCREEN_W / lay.view_w},
                    .filter2d = {smooth_2d_ ? 1.0f : 0.0f, lay.scale},

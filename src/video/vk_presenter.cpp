@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -384,7 +385,32 @@ bool VkPresenter::init(const char* title, int width, int height, bool with_ngx) 
             found += !strcmp(a.extensionName, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) ||
                      !strcmp(a.extensionName, VK_KHR_RAY_QUERY_EXTENSION_NAME) ||
                      !strcmp(a.extensionName, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-        if (found == 3) {
+        // Ray tracing is offered only where it can keep up. Left out:
+        // - NVIDIA before Ampere (RTX 30): the GTX 10 and 16 cards have no RT
+        //   cores, yet their driver may offer ray queries traced on the
+        //   shaders, far too slow for this (GitHub issue #142: a GTX 1080 at
+        //   15-20 fps), and the RTX 20's were a first try. By PCI id: Ampere
+        //   starts at 0x2200 (the GA100 below it, 0x20B0-0x20FF, has no RT cores).
+        // - AMD RX 6000 (RDNA2, PCI ids 0x73A0-0x743F): ray tracing about as
+        //   slow as an RTX 20's.
+        // - Integrated GPUs (the Steam Deck's, Radeon 680M/780M, Intel's):
+        //   their drivers may offer ray queries, far too slow with the
+        //   traced shadows, occlusion and bounced light all on.
+        // SR2_RT_ANY_GPU=1: offered on any GPU whose driver has ray queries
+        VkPhysicalDeviceProperties p;
+        vkGetPhysicalDeviceProperties(gpu_, &p);
+        static const bool any_gpu = getenv("SR2_RT_ANY_GPU") && atoi(getenv("SR2_RT_ANY_GPU")) != 0;
+        const char* too_weak = nullptr;
+        if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+            too_weak = "an integrated GPU";
+        else if (p.vendorID == 0x10DE && p.deviceID < 0x2200)
+            too_weak = "older than an RTX 30";
+        else if (p.vendorID == 0x1002 && p.deviceID >= 0x73A0 && p.deviceID <= 0x743F)
+            too_weak = "an RX 6000";
+        if (any_gpu) too_weak = nullptr;
+        if (found == 3 && too_weak)
+            printf("[vulkan] ray tracing left off: %s is %s (SR2_RT_ANY_GPU=1 to try it)\n", p.deviceName, too_weak);
+        if (found == 3 && !too_weak) {
             VkPhysicalDeviceVulkan12Features have{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
             frq.pNext = &have;
             fas.pNext = &frq;

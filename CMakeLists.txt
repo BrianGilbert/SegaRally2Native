@@ -193,6 +193,7 @@ endif()
 # terminal it was started from, so the log still shows there
 add_executable(SegaRally2 WIN32
     src/runtime/runtime.cpp
+    src/runtime/pad_rumble.cpp
     src/runtime/app.cpp
     src/runtime/app_files.cpp
     src/runtime/app_input.cpp

@@ -324,7 +324,8 @@ int main(int argc, char** argv) {
             printf("[experience] ARCADE ORIGINAL\n");
         } else other_ini = arcade_ini;
         aa_auto = !ini.aa_saved && nvidia_card();
-        if (aa_auto) ini.aa = 1;   // DLAA; DLSS QUALITY or MSAA once the screen and the GPU are known
+        if (aa_auto) ini.aa = 1;   // DLAA; DLSS QUALITY or FXAA once the screen and the GPU are known
+        else if (!ini.aa_saved) ini.aa = 7;   // no DLSS on other cards: FXAA, cheap (MSAA 4x cost old cards a lot)
         options_from_settings(g_opt, ini);
         g_pad_rumble = ini.vibration;
         g_trigger_share = ini.trigger_rumble / 100.0f;
@@ -480,6 +481,10 @@ int main(int argc, char** argv) {
                     "Sega Rally 2 Native", MB_OK | MB_ICONERROR);
         return 1;
     }
+    // DLAA or DLSS asked for on a card without them (not an RTX): FXAA instead
+    const bool dlss_failed = g_opt.dlaa && !renderer.dlaa_active();
+    if (dlss_failed) g_opt.dlaa = false, g_opt.dlss = 0, g_opt.fxaa = true, g_opt.msaa = 1;
+    renderer.set_fxaa(g_opt.fxaa);
     renderer.set_max_aspect(g_opt.max_aspect);
     renderer.set_pixel_aspect(g_opt.pixel_aspect);
     // The 2D layers: xBR smoothing with the HD HUD, the ROM's own pixels without it
@@ -500,11 +505,10 @@ int main(int argc, char** argv) {
     renderer.set_sharpen(g_opt.sharpen ? 0.5f : 0.0f);
     if (g_opt.haze > 0) printf("[video] distance haze on (strength %.2f)\n", g_opt.haze);
     if (aa_auto) {   // what the first run got: the menu shows it, and saves it with the first setting changed
-        if (!renderer.dlaa_active()) g_opt.dlaa = false, g_opt.dlss = 0;
-        ini.aa = g_opt.dlss ? 2 + g_opt.dlss : g_opt.dlaa ? 1 : 0;
+        ini.aa = g_opt.dlss ? 2 + g_opt.dlss : g_opt.dlaa ? 1 : g_opt.fxaa ? 7 : 0;
         printf("[video] first run: anti-aliasing chosen for this GPU and screen\n");
     }
-    if (g_opt.dlaa && !renderer.dlaa_active()) printf("[video] DLAA not available: using MSAA\n");
+    if (dlss_failed) printf("[video] DLAA/DLSS not available on %s: using FXAA\n", presenter.device_name().c_str());
     if (renderer.dlaa_active())
         printf("[video] antialiasing NVIDIA %s, anisotropic filtering %dx%s\n",
                !renderer.dlss_upscaling() ? "DLAA"
@@ -513,6 +517,9 @@ int main(int argc, char** argv) {
                : g_opt.dlss == 4          ? "DLSS ULTRA PERFORMANCE"
                                           : "DLSS QUALITY",
                g_opt.aniso,
+               g_opt.aniso > 0 ? " with mipmaps" : " (no mipmaps)");
+    else if (renderer.fxaa())
+        printf("[video] antialiasing FXAA, anisotropic filtering %dx%s\n", g_opt.aniso,
                g_opt.aniso > 0 ? " with mipmaps" : " (no mipmaps)");
     else
         printf("[video] antialiasing MSAA %dx, anisotropic filtering %dx%s\n", renderer.msaa_samples(), g_opt.aniso,
@@ -529,9 +536,20 @@ int main(int argc, char** argv) {
     pack.init("textures", g_opt.dump_textures ? "out/textures" : "", "save/clean_textures");
     pack.set_max_slots(renderer.texture_slots());
     // HD LIVERIES off (classic_liveries): the cars keep the ROM's own textures;
-    // the pack stays loaded so the option changes during a race (dumping keeps it on)
-    auto liveries_pack = [&]() -> TexturePack* { return g_opt.classic_liveries && !g_opt.dump_textures ? nullptr : &pack; };
-    builder.set_texture_pack(liveries_pack(), &g_texture_ram);
+    // the pack stays loaded so the option changes during a race (dumping keeps it on).
+    // With the sun shadows, FOREST's road without the shadows painted into it (texture_pack.h)
+    auto texture_pack = [&]() -> TexturePack* {
+        pack.set_use_files(!g_opt.classic_liveries || g_opt.dump_textures);
+        pack.set_unpaint_shadows(g_opt.shadows);
+        return &pack;
+    };
+    // The race is on FOREST: the round (0x22CF48) is the course id + 6 x the kind, FOREST's id 1
+    // (docs/game_ram.md); R3DSceneBuilder::set_forest
+    auto forest_race = [] {
+        uint32_t round = rd32(0x22CF48);
+        return round < 18 && round % 6 == 1;
+    };
+    builder.set_texture_pack(texture_pack(), &g_texture_ram);
     // 2D replacements: the foreground (GPU slots 1-191, textures/2d has 59
     // pictures) and the layers below the 3D image (192-247; the backdrops of
     // SkyPack use 248-255). More pictures than slots reuse the oldest (pack2d.h)
@@ -677,6 +695,8 @@ int main(int argc, char** argv) {
         g_other_settings = &frontend.other;
         frontend.aa_at_launch = s.aa;
         frontend.rt_available = renderer.ray_tracing_available();
+        // DLAA and DLSS in the menu only on a card that runs them (an RTX)
+        frontend.dlss_available = renderer.dlaa_active() || (!dlss_failed && strstr(presenter.device_name().c_str(), "RTX"));
         frontend.resolutions = presenter.display_modes();
         if (s.res_w > 0 && !frontend.resolutions.empty()) {   // a size that is not one of the monitor's modes: the nearest
             auto best = frontend.resolutions[0];
@@ -915,8 +935,8 @@ int main(int argc, char** argv) {
         layers_shown = &l;
     };
 
-    // Preparation thread: while interpolating, each new game frame is made
-    // ready as soon as the game finishes it, its 3D scene and its 2D layers
+    // Preparation thread: each new game frame is made ready (with either
+    // MOTION setting; not for replays and --shot) as soon as the game finishes it, its 3D scene and its 2D layers
     // side by side, so this thread only draws and keeps up with every
     // refresh (the two took ~14 ms here, more than a refresh at 120 Hz, and
     // the images went out unevenly). The interpolation delay follows when
@@ -989,7 +1009,8 @@ int main(int argc, char** argv) {
                 double from = qpc_seconds();
                 builder.set_fov_widened(g_wide_applied);
                 builder.set_hide_blob_shadows(g_opt.shadows && g_opt.ray_tracing >= 1 && renderer.ray_tracing_available());
-                builder.set_texture_pack(liveries_pack(), &g_texture_ram);
+                builder.set_forest(forest_race(), g_opt.sun, g_opt.shadows);
+                builder.set_texture_pack(texture_pack(), &g_texture_ram);
                 builder.set_view_wide(g_opt.max_aspect > 4.0f / 3.0f + 0.01f ? std::max(1.0f, g_wide_view.load()) : 1.0f);
                 builder.build(*state, p->scene);
                 double built_at = qpc_seconds();
@@ -1277,6 +1298,7 @@ int main(int argc, char** argv) {
                     renderer.set_reflections(g_opt.reflections = s.reflections);
                     renderer.set_global_illumination(g_opt.gi = s.gi);
                     r3d_set_sr2_dust(g_opt.dust = s.dust);
+                    g_opt.object_distance = s.object_distance;   // the game thread's next frame (game_hooks.cpp)
                     renderer.set_sharpen((g_opt.sharpen = s.sharpen) ? 0.5f : 0.0f);
                     if (g_opt.classic_hud != !s.hd_hud) {
                         g_opt.classic_hud = !s.hd_hud;
@@ -1586,8 +1608,17 @@ int main(int argc, char** argv) {
         // SR2_ATTRACT_SMOOTH=1: smooth there too (to compare)
         static const bool attract_smooth = getenv("SR2_ATTRACT_SMOOTH") && atoi(getenv("SR2_ATTRACT_SMOOTH")) == 1;
         bool interpolating = g_opt.interp && g_opt.replay.empty() && !g_opt.shot_frame && (attract_smooth || !g_in_attract);
-        if (interpolating != prep_on) {   // a frame it made earlier is not one to go back to
-            prep_on = interpolating;
+        // MOTION ORIGINAL too: each new game frame is made ready on the
+        // preparation thread as soon as the game has it, and shown once it is.
+        // Made here, its 3D scene (5-7 ms at the Mountain's start, peaks of
+        // 12-20) came on top of this image's own work, and at 120 Hz the image
+        // that took a new frame missed its refresh: 85-110 images a second
+        // instead of 120 by the castle. Replays and --shot still build here
+        // (the same frame every time). SR2_BUILD_HERE=1: as before (to compare)
+        static const bool build_here = getenv("SR2_BUILD_HERE") && atoi(getenv("SR2_BUILD_HERE")) == 1;
+        bool prepared = interpolating || (!build_here && g_opt.replay.empty() && !g_opt.shot_frame);
+        if (prepared != prep_on) {   // a frame it made earlier is not one to go back to
+            prep_on = prepared;
             std::lock_guard<std::mutex> lock(ready_mutex);
             ready_queue.clear();
         }
@@ -1595,7 +1626,7 @@ int main(int argc, char** argv) {
         std::shared_ptr<const R3DFrameState> latest;
         std::shared_ptr<Prepared> ready;                  // the newest one made ready
         std::vector<std::shared_ptr<Prepared>> waiting;   // those not taken yet, oldest first
-        if (interpolating) {
+        if (prepared) {
             std::lock_guard<std::mutex> lock(ready_mutex);
             // (the newest stays, taken or not: the timing follows it)
             while (ready_queue.size() > 1 && ready_queue.front()->serial <= taken_serial) ready_queue.pop_front();
@@ -1657,8 +1688,10 @@ int main(int argc, char** argv) {
                     if (w->state->time >= shown_time) break;
                 }
             }
+        } else if (prepared && !interpolating && ready && ready->serial > taken_serial) {
+            next_ready = ready;   // without interpolation, the newest at once
         }
-        std::shared_ptr<const R3DFrameState> next_state = interpolating ? (next_ready ? next_ready->state : nullptr) : latest;
+        std::shared_ptr<const R3DFrameState> next_state = prepared ? (next_ready ? next_ready->state : nullptr) : latest;
         bool take = next_state && next_state != built;
         // The 2D layers of each vblank are kept in a few copies: while the 3D
         // frames are interpolated, those of the 3D frame drawn are shown (the
@@ -1670,7 +1703,7 @@ int main(int argc, char** argv) {
             poll_snapshots();
             newest_2d = snaps[newest_snap].frame;
         }
-        bool follow = interpolating && latest && newest_2d != ~0ull && newest_2d <= latest->vblank + 4;
+        bool follow = prepared && latest && newest_2d != ~0ull && newest_2d <= latest->vblank + 4;
         double scene_from = qpc_seconds(), scene_seconds = 0;   // 2D composition and 3D scene build here (CPU)
         const uint64_t shown_before = shown;
         // (shown = ~0: composed again here, as after a change of settings in the pause menu)
@@ -1707,7 +1740,8 @@ int main(int argc, char** argv) {
                 std::lock_guard<std::mutex> lock(prep_mutex);
                 builder.set_fov_widened(g_wide_applied);
                 builder.set_hide_blob_shadows(g_opt.shadows && g_opt.ray_tracing >= 1 && renderer.ray_tracing_available());
-                builder.set_texture_pack(liveries_pack(), &g_texture_ram);
+                builder.set_forest(forest_race(), g_opt.sun, g_opt.shadows);
+                builder.set_texture_pack(texture_pack(), &g_texture_ram);
                 builder.set_view_wide(g_opt.max_aspect > 4.0f / 3.0f + 0.01f ? std::max(1.0f, g_wide_view.load()) : 1.0f);
                 builder.build(*next_state, own_scene);
                 auto images = pack.take_new_images();

@@ -46,8 +46,9 @@ versions will not work. `build.bat` says which chips are missing.
 ## Install
 
 You need Windows 10/11 (64-bit) and a GPU with a Vulkan 1.3 driver (most from 2016 on). Ray
-tracing needs an NVIDIA RTX or an AMD RX 6000 or newer; DLAA and DLSS, an NVIDIA RTX. On other
-cards those options switch themselves off, and the game builds the same on any GPU.
+tracing needs an NVIDIA RTX 30 or an AMD RX 7000 or newer (not an integrated GPU); DLAA and
+DLSS, an NVIDIA RTX. On other cards those options switch themselves off, and the game builds
+the same on any GPU.
 
 Install it with **[NicoLauncher](https://github.com/snicolast/NicoLauncher-Hub)**, a free app that
 downloads, builds, updates and starts the game for you. No Visual Studio, nothing to set up by hand.
@@ -128,6 +129,12 @@ The code in this repository is under the [MIT License, with additional terms](LI
 [Controller Input Icons](https://opengameart.org/content/controller-input-icons) by ElDuderino (CC0).
 The game itself (ROM, code, data, music and voices) is not included and stays the property of its
 owners: you need your own copy of `srally2.zip`.
+
+DLAA and DLSS use the [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS), under NVIDIA's own license.
+NVIDIA's `nvngx_dlss.dll` is always downloaded from NVIDIA. The `dlss_bridge.dll` that NicoLauncher installs get
+is built from `tools/dlss_bridge` and kept, with NVIDIA's license and notice, in
+[NicoLauncher-Hub](https://github.com/snicolast/NicoLauncher-Hub/tree/main/dlss). NVIDIA, DLSS and RTX are
+trademarks of NVIDIA Corporation.
 
 **No prebuilt downloads.** The license does not allow anyone to share a compiled build of this
 port, a ROM, or anything made from one. I have never published any of them: everyone builds the

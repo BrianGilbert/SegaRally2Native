@@ -37,7 +37,7 @@ struct FrontendSettings {
     int speakers = 0;  // 0 stereo, 1 surround 4.0, 2 headphones (AudioStream::Speakers)
     int rear_boost = 6;  // dB on the rear pair: 0, 3, 6, 9, 12
     bool cubic_samples = true;   // smooth (cubic) sample interpolation instead of the original linear one
-    int aa = 0;        // 0 MSAA, 1 DLAA, 2 off, 3 DLSS QUALITY, 4 BALANCED, 5 PERFORMANCE, 6 ULTRA PERFORMANCE (next launch)
+    int aa = 0;        // 0 MSAA, 1 DLAA, 2 off, 3 DLSS QUALITY, 4 BALANCED, 5 PERFORMANCE, 6 ULTRA PERFORMANCE, 7 FXAA (next launch)
     // settings.ini only (dlss_model = auto / k / m / l), for advanced users: the
     // model DLAA and DLSS use. 0 AUTO (dlss::preset_for), 1 K, 2 M, 3 L
     int dlss_model = 0;
@@ -53,6 +53,9 @@ struct FrontendSettings {
     bool reflections = true;   // the world mirrored on the cars (ray tracing)
     int gi = 1;                // global illumination, the sun's light bounced off the world (ray tracing): 0 off, 1 on
     bool dust = true;      // Sega Rally 2: dust and stones as particles (false: the game's own flat fans)
+    // OBJECT DISTANCE: metres ahead of the camera the spectators, cameramen, signs,
+    // cones... appear from: 250, 200, 150 or 100 (the arcade's)
+    int object_distance = 250;
     bool sharpen = true;   // contrast adaptive sharpening
     bool hd_hud = true;    // redrawn HUD and game screens (false: the ROM's own graphics)
     bool hd_liveries = true;   // the cars' redone paint, textures/*.png (false: the ROM's own textures)
@@ -151,6 +154,7 @@ public:
     int client_w = 0, client_h = 0, desktop_w = 0, desktop_h = 0;   // the window's inside, the desktop (app.cpp)
     int refresh_hz = 60;                            // the monitor's (MAX FPS MONITOR)
     bool rt_available = false;   // the GPU can trace rays (RAY TRACING option)
+    bool dlss_available = true;  // the GPU can run DLAA and DLSS (an NVIDIA RTX): otherwise they are left out of ANTI-ALIASING
     std::wstring gamepads;  // the pads connected, for the CONTROLS tab ("" = none)
     // CONTROLS > WHEEL (app.cpp fills them from wheel.h's wheel_rows): choosing a
     // row gives WheelRow with its number and direction; while a control listens
@@ -228,7 +232,7 @@ private:
         DEBUG, DEBUG_COURSE, DEBUG_CAR, DEBUG_GEARS, DEBUG_TIME, DEBUG_GO,
         OPT_QUALITY,   // (no row: the first of the option ids, the ones >= it are options)
         OPT_DISPLAY, OPT_VOLUME, OPT_MUSIC, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SUN, OPT_SHADOWS, OPT_SOFT, OPT_HDR, OPT_SHARPEN, OPT_HUD, OPT_LIVERIES,
-        OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_VIBRATION, OPT_RT, OPT_MENU_MUSIC, OPT_REFLECT, OPT_GI, OPT_DUST, OPT_UPDATES,
+        OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_VIBRATION, OPT_RT, OPT_MENU_MUSIC, OPT_REFLECT, OPT_GI, OPT_DUST, OPT_OBJECTS, OPT_UPDATES,
         OPT_DIFFICULTY, OPT_CONNECTED, OPT_TRIGGERS, OPT_RESOLUTION, OPT_SCALE, OPT_VSYNC, OPT_MAXFPS, OPT_BGFPS,
         OPT_EXPERIENCE, OPT_ASPECT, OPT_ARCADE_ASPECT,
         OPT_WHEEL,   // CONTROLS > WHEEL: one row per wheel_lines entry (Item::index)   // OPT_ARCADE_ASPECT: ARCADE ORIGINAL's, under EXPERIENCE

@@ -122,6 +122,9 @@ public:
     std::string worst_gpu_frame();
     // Contrast adaptive sharpening of the 3D image: 0 = off, 1 = strongest
     void set_sharpen(float amount) { sharpen_ = amount; }
+    // FXAA over the finished 3D image (compose.frag): cheap edge smoothing for cards without DLAA
+    void set_fxaa(bool on) { fxaa_ = on; }
+    bool fxaa() const { return fxaa_ && !dlaa_.ready(); }
     // Sun shadows (not in the original): the game world casts shadows along
     // the game's own light direction; 0 = off, 1 = default strength
     void set_shadows(float strength) { shadow_strength_ = strength; }
@@ -237,11 +240,13 @@ private:
     bool sun_ = false;
     bool reflections_ = true;
     float sharpen_ = 0;
+    bool fxaa_ = false;
     Image shadow_map_;                 // depth seen from the sun
     float shadow_strength_ = 0;
     float shadow_matrix_[16] = {};     // view space -> shadow map, this frame
     float shadow_up_[3] = {}, shadow_height_ = 0;   // world up in view space, camera height above the ground
     bool shadow_frame_ = false;        // the shadow map is drawn this frame
+    size_t backs_uploaded_ = 0;       // the world's back faces after the scene's vertices (shadowmap_backs)
     VkPipeline shadow_ = VK_NULL_HANDLE;
     R3DRayTracer rt_;
     int ray_tracing_ = 2;

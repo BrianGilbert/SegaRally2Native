@@ -71,9 +71,9 @@ const std::vector<Entry>& table() {
         section("Picture"),
         real("--scale", &Options::supersample, "internal 3D resolution multiplied by F (1)"),
         num("--msaa", &Options::msaa, "samples per pixel (4; 1 = no MSAA)"),
-        custom("--aa", "msaa|dlaa|dlss|dlss_balanced|dlss_performance|dlss_ultra|none",
-               "antialiasing: msaa (default), dlaa, dlss (quality upscaling), dlss_balanced, dlss_performance, dlss_ultra "
-               "(all NVIDIA) or none", false,
+        custom("--aa", "msaa|fxaa|dlaa|dlss|dlss_balanced|dlss_performance|dlss_ultra|none",
+               "antialiasing: msaa (default), fxaa (cheap, for older cards), dlaa, dlss (quality upscaling), dlss_balanced, "
+               "dlss_performance, dlss_ultra (all NVIDIA) or none", false,
                [](Options& o, const char* v) {
                    static const char* const DLSS[5] = {"", "dlss", "dlss_balanced", "dlss_performance", "dlss_ultra"};
                    o.dlss = 0;
@@ -81,7 +81,8 @@ const std::vector<Entry>& table() {
                        if (strcmp(v, DLSS[m]) == 0) o.dlss = m;
                    if (strcmp(v, "dlss_quality") == 0) o.dlss = 1;
                    o.dlaa = o.dlss || strcmp(v, "dlaa") == 0;
-                   if (strcmp(v, "none") == 0 || strcmp(v, "off") == 0) o.msaa = 1;
+                   o.fxaa = strcmp(v, "fxaa") == 0;
+                   if (strcmp(v, "none") == 0 || strcmp(v, "off") == 0 || o.fxaa) o.msaa = 1;
                }),
         custom("--dlss-model", "auto|k|m|l", "DLSS's model (preset): auto (K, M for dlss_performance, L for dlss_ultra; "
                "K without FP8, RTX 20/30), k, m or l", false,
@@ -119,6 +120,8 @@ const std::vector<Entry>& table() {
                [](Options& o, const char* v) { o.gi = strcmp(v, "off") == 0 || strcmp(v, "0") == 0 ? 0 : 1; }),
         custom("--no-gi", nullptr, "no global illumination (as --gi off)", false, [](Options& o, const char*) { o.gi = 0; }),
         off("--classic-dust", &Options::dust, "the arcade's flat fans of dust behind the wheels, no particles"),
+        num("--object-distance", &Options::object_distance,
+            "metres ahead the spectators, cameramen, signs... appear from (250; 100 = original)"),
         off("--no-sharpen", &Options::sharpen, "no adaptive sharpening of the 3D image"),
         off("--no-interp", &Options::interp, "game frames as they are, not interpolated"),
         flag("--letterbox", &Options::letterbox, "keep the black bars of the cutscenes"),

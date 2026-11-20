@@ -13,6 +13,29 @@
 #   # ...          a comment, never shown
 # Newest entry at the top. Keep each one short: about ten lines fit.
 
+[34] 20 November 2026
+- NVIDIA RTX: DLAA and DLSS now work in installs made with NicoLauncher. Until now those installs quietly used another anti-aliasing instead. Press Update in the launcher to get them (it downloads about 60 MB from NVIDIA).
+
+[33] 20 November 2026
+- FOREST: areas out of the sun (shadows, the shaded house fronts at the start) should look lighter, closer to the other courses.
+- FOREST: the dark band across the road under the start's arch should be gone.
+- FOREST: with ray tracing off, the car's shadow should no longer sink into the road over bumps or flicker on jump landings.
+
+[32] 20 November 2026
+- New FXAA anti-aliasing for cards without DLSS (GTX, AMD, Intel): it replaces the heavier MSAA 4x those cards used before, which may help performance.
+- Ray tracing, RT reflections and Global Illumination are now only offered on NVIDIA RTX 30, AMD RX 7000 or newer, and Intel Arc cards. On other GPUs (GTX 10 and 16, RTX 20, RX 6000, integrated ones like the Steam Deck's) they show N/A, which may help performance there.
+- Performance should be close to what it was before the last update again: ambient occlusion costs much less GPU time, which may help most at high resolutions and on weaker cards.
+- FOREST: with sun shadows on, the shadows painted into the road should no longer show twice.
+
+[31] 19 November 2026
+- Performance improvements and optimizations, which should mean fewer dropped frames in demanding spots.
+- With Global Illumination on, the faint film of dots on the tarmac that moved with the car should be gone.
+
+[30] 19 November 2026
+- New OBJECT DISTANCE option (GRAPHICS > WORLD): spectators and roadside objects can now show up to 250 m away instead of 100 m.
+- Some sun shadows on the scenery should no longer pop in by chunks as you drive.
+- Pad rumble now comes from the car: you may feel the ground under the wheels, slides and landings, and the triggers stay quiet outside races.
+
 [29] 19 November 2026
 - PRACTICE has a fifth course, FOREST: the unused stage hidden in the ROM, marked PROTOTYPE since it was never finished.
 - HD number plate: the HD "1" should now only show when you are 1st; other positions keep the game's own plate.

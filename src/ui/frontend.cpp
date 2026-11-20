@@ -169,7 +169,7 @@ void FrontendSettings::load(const char* path, const char* section) {
         else if (k == "sample_interpolation") cubic_samples = v != "linear";
         else if (k == "aa") {   // ("dlss" is DLSS QUALITY, as before the other modes)
             aa = v == "dlaa" ? 1 : v == "dlss" || v == "dlss_quality" ? 3 : v == "dlss_balanced" ? 4
-               : v == "dlss_performance" ? 5 : v == "dlss_ultra" ? 6 : (v == "none" || v == "off") ? 2 : 0;
+               : v == "dlss_performance" ? 5 : v == "dlss_ultra" ? 6 : (v == "none" || v == "off") ? 2 : v == "fxaa" ? 7 : 0;
             aa_saved = true;
         } else if (k == "dlss_model") dlss_model = v == "k" ? 1 : v == "m" ? 2 : v == "l" ? 3 : 0;
         else if (k == "haze") haze = on;
@@ -184,6 +184,7 @@ void FrontendSettings::load(const char* path, const char* section) {
         // (on or off: a "high" saved before that level was dropped turns into on)
         else if (k == "global_illumination") gi = v == "off" || v == "0" ? 0 : 1;
         else if (k == "dust") dust = v != "original" && v != "0";
+        else if (k == "object_distance") object_distance = std::clamp((atoi(value) + 25) / 50 * 50, 100, 250);
         else if (k == "sharpen") sharpen = on;
         else if (k == "hd_hud" || k == "hd_text") hd_hud = on;
         else if (k == "hd_liveries") hd_liveries = on;
@@ -210,7 +211,7 @@ std::string FrontendSettings::text(bool section) const {
     std::string out;
     char buf[2048];
     if (!section) out += experience ? "experience = arcade\n" : "experience = pc\n";
-    static const char* const AA[7] = {"msaa", "dlaa", "none", "dlss", "dlss_balanced", "dlss_performance", "dlss_ultra"};
+    static const char* const AA[8] = {"msaa", "dlaa", "none", "dlss", "dlss_balanced", "dlss_performance", "dlss_ultra", "fxaa"};
     static const char* const MODELS[4] = {"auto", "k", "m", "l"};
     static const char* const BLOOM[4] = {"off", "low", "medium", "high"};   // also the vibration levels
     static const char* const SPEAKERS[3] = {"stereo", "surround", "headphones"};
@@ -219,7 +220,7 @@ std::string FrontendSettings::text(bool section) const {
                "saturation = %d\ngamma = %.2f\nmotion = %s\nspeakers = %s\nrear_boost = %d\nsample_interpolation = %s\n"
                "vibration = %s\nray_tracing = %s\n"
                "splash_screens = %d\nmenu_music = %d\n",
-            display_mode != 0, volume, music, AA[std::clamp(aa, 0, 6)], haze, BLOOM[bloom], ao, sun, shadows, soft, hdr, sharpen, hd_hud, saturation,
+            display_mode != 0, volume, music, AA[std::clamp(aa, 0, 7)], haze, BLOOM[bloom], ao, sun, shadows, soft, hdr, sharpen, hd_hud, saturation,
             gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
             BLOOM[vibration], RT_MODES[ray_tracing],
             splash, menu_music);
@@ -236,7 +237,7 @@ std::string FrontendSettings::text(bool section) const {
                  telemetry, telemetry_port);
         out += buf;
     }
-    snprintf(buf, sizeof(buf), "rt_reflections = %d\nglobal_illumination = %s\ndust = %s\ndifficulty = %s\nhd_liveries = %d\ntrigger_rumble = %d\n", reflections, gi ? "low" : "off", dust ? "enhanced" : "original", DIFFICULTY_KEYS[std::clamp(difficulty, 0, 4)], hd_liveries, trigger_rumble);
+    snprintf(buf, sizeof(buf), "rt_reflections = %d\nglobal_illumination = %s\ndust = %s\ndifficulty = %s\nhd_liveries = %d\ntrigger_rumble = %d\nobject_distance = %d\n", reflections, gi ? "low" : "off", dust ? "enhanced" : "original", DIFFICULTY_KEYS[std::clamp(difficulty, 0, 4)], hd_liveries, trigger_rumble, object_distance);
     out += buf;
     static const char* const ASPECTS[5] = {"auto", "32:9", "21:9", "16:9", "4:3"};
     snprintf(buf, sizeof(buf), "aspect = %s\ngame_mode = %s\ndefault_view = %s\nspeed = %s\nfree_play = %d\n",
@@ -269,6 +270,7 @@ void FrontendSettings::arcade_base() {
     reflections = false;
     gi = 0;
     dust = false;
+    object_distance = 100;                // the spectators appear 100 m ahead, as on the cabinet
     sun = shadows = hdr = ao = haze = soft = sharpen = false;
     bloom = 0;
     saturation = gamma = 100;
@@ -388,6 +390,7 @@ const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_SUN, LIGHTING_TAB, L"LIGHTING"}, {OPT_SHADOWS, LIGHTING_TAB}, {OPT_HDR, LIGHTING_TAB}, {OPT_AO, LIGHTING_TAB},
     {OPT_BLOOM, LIGHTING_TAB}, {OPT_HAZE, LIGHTING_TAB},
     {OPT_RT, LIGHTING_TAB, L"RAY TRACING"}, {OPT_REFLECT, LIGHTING_TAB}, {OPT_GI, LIGHTING_TAB},
+    {OPT_OBJECTS, LIGHTING_TAB, L"WORLD"},
     {OPT_DUST, LIGHTING_TAB, L"ARCADE ART"}, {OPT_HUD, LIGHTING_TAB}, {OPT_LIVERIES, LIGHTING_TAB},
     {OPT_VOLUME, AUDIO_TAB, L"VOLUME"}, {OPT_MUSIC, AUDIO_TAB}, {OPT_MENU_MUSIC, AUDIO_TAB},
     {OPT_SPEAKERS, AUDIO_TAB, L"SOUND"}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
@@ -449,8 +452,8 @@ constexpr int DEBUG_CAR_COUNT = int(sizeof(DEBUG_CARS) / sizeof(DEBUG_CARS[0]));
 
 std::vector<Frontend::Item> Frontend::items() const {
     auto on_off = [](bool v) { return std::wstring(v ? L"ON" : L"OFF"); };
-    static const wchar_t* const AA[7] = {L"MSAA 4X", L"DLAA", L"OFF", L"DLSS QUALITY", L"DLSS BALANCED",
-                                         L"DLSS PERFORMANCE", L"DLSS ULTRA PERFORMANCE"};
+    static const wchar_t* const AA[8] = {L"MSAA 4X", L"DLAA", L"OFF", L"DLSS QUALITY", L"DLSS BALANCED",
+                                         L"DLSS PERFORMANCE", L"DLSS ULTRA PERFORMANCE", L"FXAA"};
     static const wchar_t* const BLOOM_LEVELS[4] = {L"OFF", L"LOW", L"MEDIUM", L"HIGH"};
     static const wchar_t* const SPEAKERS[3] = {L"STEREO", L"SURROUND 4.0", L"HEADPHONES"};
     static const wchar_t* const SPEAKER_HINTS[3] = {
@@ -497,15 +500,16 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {SETTINGS, L"SETTINGS", L"", L"Display, sound and controls"},
                 {QUIT_TO_MENU, L"QUIT TO MAIN MENU", L"", L"Leave this game and go back to the main menu"}};
     case Screen::Options: {
-        static const wchar_t* const AA_HINTS[7] = {
+        static const wchar_t* const AA_HINTS[8] = {
             L"Classic edge smoothing",
             L"NVIDIA DLAA: the cleanest edges, at full size",
             L"No edge smoothing: the fastest, with jagged edges",
             L"NVIDIA DLSS: draws the 3D smaller and sharpens it back; much faster, nearly as sharp",
             L"NVIDIA DLSS: draws the 3D smaller still and sharpens it back; faster, slightly softer",
             L"NVIDIA DLSS: draws the 3D at half size and sharpens it back; for 4K or slower cards",
-            L"NVIDIA DLSS: draws the 3D at a third of the size; the fastest, the softest"};
-        std::wstring aa_hint = std::wstring(AA_HINTS[std::clamp(settings.aa, 0, 6)]) +
+            L"NVIDIA DLSS: draws the 3D at a third of the size; the fastest, the softest",
+            L"Light edge smoothing over the finished picture: very cheap, for older graphics cards"};
+        std::wstring aa_hint = std::wstring(AA_HINTS[std::clamp(settings.aa, 0, 7)]) +
                                (settings.aa != aa_at_launch ? L".  Applies after a restart (offered when you leave the settings)"
                                                             : L".  Applies after a restart");
         wchar_t gamma_text[16];
@@ -590,7 +594,7 @@ std::vector<Frontend::Item> Frontend::items() const {
                  L"Louder rear speakers, as the cabinet's seat speakers"},
                 {OPT_SAMPLES, L"SAMPLE QUALITY", settings.cubic_samples ? L"SMOOTH" : L"ORIGINAL",
                  L"Smooth interpolation of the instrument and voice samples, or the original chip's"},
-                {OPT_AA, L"ANTI-ALIASING", AA[std::clamp(settings.aa, 0, 6)], aa_hint},
+                {OPT_AA, L"ANTI-ALIASING", AA[std::clamp(settings.aa, 0, 7)], aa_hint},
                 {OPT_HAZE, L"DISTANCE HAZE", on_off(settings.haze),
                  L"Far scenery fades into the sky instead of appearing suddenly"},
                 {OPT_BLOOM, L"BLOOM", BLOOM_LEVELS[settings.bloom], L"Soft glow around the sun, lights and bright reflections"},
@@ -600,7 +604,7 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {OPT_SHADOWS, L"SUN SHADOWS", on_off(settings.shadows),
                  L"Cars, trees and scenery cast shadows away from the sun"},
                 {OPT_RT, L"RAY TRACING", !rt_available ? L"N/A" : RT_MODES[settings.ray_tracing],
-                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX, AMD RX 6000 or newer)"
+                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX 30, AMD RX 7000 or newer)"
                                : RT_HINTS[settings.ray_tracing],
                  rt_available},
                 {OPT_SOFT, L"SOFT PARTICLES", on_off(settings.soft),
@@ -608,16 +612,20 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {OPT_HDR, L"HDR LIGHTING", on_off(settings.hdr),
                  L"Bright light keeps its detail instead of clipping to white; exposure adapts gently"},
                 {OPT_REFLECT, L"RT REFLECTIONS", !rt_available ? L"N/A" : on_off(settings.reflections),
-                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX, AMD RX 6000 or newer)"
+                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX 30, AMD RX 7000 or newer)"
                                : L"The scenery, the stands and the other cars mirrored on the cars' paint and glass (with ray tracing on)",
                  rt_available},
                 {OPT_GI, L"GLOBAL ILLUMINATION", !rt_available ? L"N/A" : on_off(settings.gi != 0),
-                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX, AMD RX 6000 or newer)"
+                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX 30, AMD RX 7000 or newer)"
                                : GI_HINTS[settings.gi ? 1 : 0],
                  rt_available},
                 {OPT_DUST, L"DUST", settings.dust ? L"ENHANCED" : L"ORIGINAL",
                  settings.dust ? L"Clouds of dust that billow and hang over the road, and stones thrown up by the wheels"
                                : L"The arcade's own flat fans of dust behind the wheels"},
+                {OPT_OBJECTS, L"OBJECT DISTANCE", std::to_wstring(settings.object_distance) + L" M",
+                 settings.object_distance <= 100
+                     ? L"Spectators, cameramen, signs and cones appear 100 m ahead, as in the arcade"
+                     : L"How far ahead the spectators, cameramen, signs and cones appear (100 M = original)"},
                 {OPT_SAT, L"COLOR SATURATION", std::to_wstring(settings.saturation) + L"%",
                  L"How vivid the colours are (100% = original)"},
                 {OPT_GAMMA, L"GAMMA", gamma_text, L"Brightness of the mid-tones (1.00 = original)"},
@@ -847,12 +855,19 @@ void Frontend::activate(const Item& it, int dir) {
     case OPT_SPEAKERS: settings.speakers = (settings.speakers + dir + 3) % 3; push(Action::SettingsChanged); break;
     case OPT_REAR: settings.rear_boost = (settings.rear_boost + 3 * dir + 15) % 15; push(Action::SettingsChanged); break;
     case OPT_SAMPLES: settings.cubic_samples = !settings.cubic_samples; push(Action::SettingsChanged); break;
-    case OPT_AA: {   // OFF, MSAA, DLAA, DLSS QUALITY, BALANCED, PERFORMANCE, ULTRA PERFORMANCE
-        static const int ORDER[7] = {2, 0, 1, 3, 4, 5, 6};
+    case OPT_AA: {   // OFF, FXAA, MSAA, DLAA, DLSS QUALITY, BALANCED, PERFORMANCE, ULTRA PERFORMANCE
+        // (DLAA and DLSS only on a card that can run them, dlss_available; FXAA
+        // only on one that cannot: with DLSS there it would only be worse and slower)
+        static const int ORDER[8] = {2, 7, 0, 1, 3, 4, 5, 6};
         int at = 0;
-        for (int i = 0; i < 7; i++)
+        for (int i = 0; i < 8; i++)
             if (ORDER[i] == settings.aa) at = i;
-        settings.aa = ORDER[(at + dir + 7) % 7];
+        for (int n = 0; n < 8; n++) {
+            at = (at + dir + 8) % 8;
+            bool nvidia_only = ORDER[at] == 1 || (ORDER[at] >= 3 && ORDER[at] <= 6);
+            if (dlss_available ? ORDER[at] != 7 : !nvidia_only) break;
+        }
+        settings.aa = ORDER[at];
         push(Action::SettingsChanged);
         break;
     }
@@ -879,6 +894,10 @@ void Frontend::activate(const Item& it, int dir) {
     case OPT_REFLECT: settings.reflections = !settings.reflections; push(Action::SettingsChanged); break;
     case OPT_GI: settings.gi = settings.gi ? 0 : 1; push(Action::SettingsChanged); break;
     case OPT_DUST: settings.dust = !settings.dust; push(Action::SettingsChanged); break;
+    case OPT_OBJECTS:   // 100..250 m in steps of 50; past either end it starts again from the other
+        settings.object_distance = 100 + (settings.object_distance - 100 + 50 * dir + 200) % 200;
+        push(Action::SettingsChanged);
+        break;
     case OPT_SHARPEN: settings.sharpen = !settings.sharpen; push(Action::SettingsChanged); break;
     case OPT_HUD: settings.hd_hud = !settings.hd_hud; push(Action::SettingsChanged); break;
     case OPT_LIVERIES: settings.hd_liveries = !settings.hd_liveries; push(Action::SettingsChanged); break;
@@ -1438,12 +1457,12 @@ std::vector<Frontend::RecordRow> Frontend::record_rows() const {
 // ---- RESTART NOW? ----
 
 std::wstring Frontend::restart_list() const {
-    static const wchar_t* const AA_NAMES[7] = {L"MSAA 4X", L"DLAA", L"OFF", L"DLSS QUALITY", L"DLSS BALANCED",
-                                               L"DLSS PERFORMANCE", L"DLSS ULTRA PERFORMANCE"};
+    static const wchar_t* const AA_NAMES[8] = {L"MSAA 4X", L"DLAA", L"OFF", L"DLSS QUALITY", L"DLSS BALANCED",
+                                               L"DLSS PERFORMANCE", L"DLSS ULTRA PERFORMANCE", L"FXAA"};
     std::wstring list;
     if (settings.render_scale != scale_at_launch) list = L"RENDER SCALE " + std::to_wstring(settings.render_scale) + L"%";
     if (settings.aa != aa_at_launch)
-        list += (list.empty() ? L"" : L" and ") + std::wstring(L"ANTI-ALIASING ") + AA_NAMES[std::clamp(settings.aa, 0, 6)];
+        list += (list.empty() ? L"" : L" and ") + std::wstring(L"ANTI-ALIASING ") + AA_NAMES[std::clamp(settings.aa, 0, 7)];
     if (settings.experience != (arcade ? 1 : 0))
         list += (list.empty() ? L"" : L" and ") + std::wstring(L"EXPERIENCE ") +
                 (settings.experience ? L"ARCADE ORIGINAL" : L"PC EDITION");

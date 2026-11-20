@@ -32,6 +32,7 @@ struct Options {
     float supersample = 1.0f;        // --scale: internal 3D resolution factor
     int msaa = 4;                    // --msaa: samples per pixel (1 = off)
     bool dlaa = false;               // --aa dlaa: NVIDIA DLAA instead of MSAA (also set by --aa dlss*)
+    bool fxaa = false;               // --aa fxaa: FXAA over the 3D image instead of MSAA (cheap, for older cards)
     int dlss = 0;                    // --aa dlss*: 0 none (DLAA), 1 QUALITY, 2 BALANCED, 3 PERFORMANCE, 4 ULTRA PERFORMANCE
                                      // (the 3D drawn smaller and upscaled)
     int dlss_model = 0;              // --dlss-model: 0 auto, 1 K, 2 M, 3 L
@@ -59,6 +60,9 @@ struct Options {
     bool reflections = true;         // --no-reflections: no ray traced reflections on the cars
     int gi = 1;                      // --gi off|on: global illumination (the sun's light bounced off the world, ray traced)
     bool dust = true;                // --classic-dust: the game's own flat fans of dust, no particles
+    int object_distance = 250;       // --object-distance: metres ahead of the camera the course's placed
+                                     // objects (spectators, cameramen, signs, cones...) are put in the
+                                     // scene from; the arcade's is 100 (game_hooks.cpp)
     bool sharpen = true;             // --no-sharpen: no sharpening of the 3D image
     bool soft = true;                // --no-soft: hard edges where translucent effects meet geometry
     bool shadows = true;             // --no-shadows: no sun shadows
