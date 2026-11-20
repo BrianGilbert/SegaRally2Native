@@ -70,6 +70,10 @@ struct FrontendSettings {
     // ASPECT: 0 AUTO (fills the window, up to 32:9), 1 32:9, 2 21:9, 3 16:9, 4 4:3 (the
     // original picture, the HUD in its place). The widest picture: a wider window gets black bars
     int aspect = 3;
+    // HUD: false WIDE (its corners out at the picture's sides, up to a 16:9 one's),
+    // true 4:3 (in its place in the middle, as on the cabinet, whatever ASPECT is).
+    // With ASPECT 4:3 the picture is 4:3 anyway, so it changes nothing there
+    bool hud_43 = false;
     bool free_play = true;   // ARCADE ORIGINAL (its pause menu): FREE PLAY, or a coin per game
     // EXPERIENCE (the file's first section only): 0 PC EDITION, 1 ARCADE ORIGINAL. Each
     // experience keeps its own settings: PC EDITION's at the top of the file, ARCADE
@@ -234,7 +238,7 @@ private:
         OPT_DISPLAY, OPT_VOLUME, OPT_MUSIC, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SUN, OPT_SHADOWS, OPT_SOFT, OPT_HDR, OPT_SHARPEN, OPT_HUD, OPT_LIVERIES,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_VIBRATION, OPT_RT, OPT_MENU_MUSIC, OPT_REFLECT, OPT_GI, OPT_DUST, OPT_OBJECTS, OPT_UPDATES, OPT_TELEMETRY,
         OPT_DIFFICULTY, OPT_CONNECTED, OPT_TRIGGERS, OPT_RESOLUTION, OPT_SCALE, OPT_VSYNC, OPT_MAXFPS, OPT_BGFPS,
-        OPT_EXPERIENCE, OPT_ASPECT, OPT_ARCADE_ASPECT,
+        OPT_EXPERIENCE, OPT_ASPECT, OPT_ARCADE_ASPECT, OPT_HUD_AREA,
         OPT_WHEEL,   // CONTROLS > WHEEL: one row per wheel_lines entry (Item::index)   // OPT_ARCADE_ASPECT: ARCADE ORIGINAL's, under EXPERIENCE
     };
     struct Item {

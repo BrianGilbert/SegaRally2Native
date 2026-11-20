@@ -43,10 +43,10 @@ void options_from_settings(Options& o, const FrontendSettings& ini) {
         o.speed_kmh = ini.speed_kmh;
         o.free_play = -1;
     }
-    // ASPECT (--aspect wins): the widest picture, its pixels' shape, 4:3 keeps the HUD in its place
+    // ASPECT (--aspect wins): the widest picture, its pixels' shape; 4:3 (or HUD 4:3) keeps the HUD in its place
     o.max_aspect = FrontendSettings::aspect_ratio(ini.aspect);
     o.pixel_aspect = FrontendSettings::pixel_aspect(ini.aspect);
-    o.hud_centre = ini.aspect == 4;
+    o.hud_centre = ini.aspect == 4 || ini.hud_43;
     o.interp = ini.smooth;
     o.saturation = ini.saturation / 100.0f;
     o.gamma = ini.gamma / 100.0f;

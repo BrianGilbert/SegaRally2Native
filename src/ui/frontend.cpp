@@ -150,6 +150,7 @@ void FrontendSettings::load(const char* path, const char* section) {
             for (int a = 0; a < 5; a++)
                 if (v == NAMES[a]) aspect = a;
         }
+        else if (k == "hud") hud_43 = v == "4:3";
         else if (k == "game_mode") game_mode = v == "special" ? 1 : 0;
         else if (k == "default_view") default_view = v == "behind" ? 1 : 0;
         else if (k == "speed") speed_kmh = v == "mph" ? 0 : 1;
@@ -240,8 +241,8 @@ std::string FrontendSettings::text(bool section) const {
     snprintf(buf, sizeof(buf), "rt_reflections = %d\nglobal_illumination = %s\ndust = %s\ndifficulty = %s\nhd_liveries = %d\ntrigger_rumble = %d\nobject_distance = %d\n", reflections, gi ? "low" : "off", dust ? "enhanced" : "original", DIFFICULTY_KEYS[std::clamp(difficulty, 0, 4)], hd_liveries, trigger_rumble, object_distance);
     out += buf;
     static const char* const ASPECTS[5] = {"auto", "32:9", "21:9", "16:9", "4:3"};
-    snprintf(buf, sizeof(buf), "aspect = %s\ngame_mode = %s\ndefault_view = %s\nspeed = %s\nfree_play = %d\n",
-             ASPECTS[std::clamp(aspect, 0, 4)], game_mode ? "special" : "normal", default_view ? "behind" : "driver",
+    snprintf(buf, sizeof(buf), "aspect = %s\nhud = %s\ngame_mode = %s\ndefault_view = %s\nspeed = %s\nfree_play = %d\n",
+             ASPECTS[std::clamp(aspect, 0, 4)], hud_43 ? "4:3" : "wide", game_mode ? "special" : "normal", default_view ? "behind" : "driver",
              speed_kmh ? "kmh" : "mph", free_play);
     out += buf;
     return out;
@@ -384,7 +385,7 @@ const wchar_t* const Frontend::TAB_NAMES[Frontend::TAB_COUNT] = {L"EXPERIENCE", 
 const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_EXPERIENCE, EXPERIENCE_TAB, L"EDITION"}, {OPT_ARCADE_ASPECT, EXPERIENCE_TAB},
     {OPT_TELEMETRY, EXPERIENCE_TAB, L"EXPERIMENTAL"},
-    {OPT_DISPLAY, DISPLAY_TAB, L"SCREEN"}, {OPT_RESOLUTION, DISPLAY_TAB}, {OPT_ASPECT, DISPLAY_TAB}, {OPT_SCALE, DISPLAY_TAB}, {OPT_MOTION, DISPLAY_TAB},
+    {OPT_DISPLAY, DISPLAY_TAB, L"SCREEN"}, {OPT_RESOLUTION, DISPLAY_TAB}, {OPT_ASPECT, DISPLAY_TAB}, {OPT_HUD_AREA, DISPLAY_TAB}, {OPT_SCALE, DISPLAY_TAB}, {OPT_MOTION, DISPLAY_TAB},
     {OPT_VSYNC, DISPLAY_TAB}, {OPT_MAXFPS, DISPLAY_TAB}, {OPT_BGFPS, DISPLAY_TAB}, {OPT_AA, DISPLAY_TAB},
     {OPT_SAT, DISPLAY_TAB, L"PICTURE"}, {OPT_GAMMA, DISPLAY_TAB}, {OPT_SHARPEN, DISPLAY_TAB},
     {OPT_UPDATES, DISPLAY_TAB, L"UPDATES"},
@@ -566,6 +567,11 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {OPT_ARCADE_ASPECT, L"ASPECT", ASPECTS[std::clamp(arc.aspect, 0, 4)],
                  L"ARCADE ORIGINAL: " + aspect_hint(arc.aspect)},
                 {OPT_ASPECT, L"ASPECT", ASPECTS[std::clamp(settings.aspect, 0, 4)], aspect_hint(settings.aspect)},
+                {OPT_HUD_AREA, L"HUD POSITION", settings.aspect == 4 || settings.hud_43 ? L"4:3" : L"WIDE",
+                 settings.aspect == 4 ? std::wstring(L"With ASPECT 4:3 the HUD is always in its original place")
+                 : settings.hud_43    ? L"The HUD in its original 4:3 place in the middle, the picture still wide"
+                                      : L"The HUD's corners out towards the picture's sides (up to a 16:9 picture's)",
+                 settings.aspect != 4},
                 {OPT_DISPLAY, L"MODE", MODES[mode],
                  std::wstring(MODE_HINTS[mode]) + (pad_prompts ? L"" : L" (F11 or Alt+Enter: window / full screen)")},
                 {OPT_RESOLUTION, L"RESOLUTION", res, res_hints[mode], mode != 1 && !resolutions.empty()},
@@ -783,6 +789,7 @@ void Frontend::activate(const Item& it, int dir) {
         push(Action::SettingsChanged);
         break;
     case OPT_ASPECT: settings.aspect = (settings.aspect + dir + 5) % 5; push(Action::SettingsChanged); break;
+    case OPT_HUD_AREA: settings.hud_43 = !settings.hud_43; push(Action::SettingsChanged); break;
     case OPT_ARCADE_ASPECT: arcade_side().aspect = (arcade_side().aspect + dir + 5) % 5; push(Action::SettingsChanged); break;
     case GHOST: break;                               // coming soon
     case OPTIONS: options_from_pause_ = false; tab_ = 0; open(Screen::Options); selected_ = 1; break;

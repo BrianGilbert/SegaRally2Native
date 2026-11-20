@@ -1318,7 +1318,7 @@ int main(int argc, char** argv) {
                     // ASPECT, at once (the running experience's)
                     g_opt.max_aspect = FrontendSettings::aspect_ratio(s.aspect);
                     g_opt.pixel_aspect = FrontendSettings::pixel_aspect(s.aspect);
-                    g_opt.hud_centre = s.aspect == 4;
+                    g_opt.hud_centre = s.aspect == 4 || s.hud_43;
                     renderer.set_max_aspect(g_opt.max_aspect);
                     renderer.set_pixel_aspect(g_opt.pixel_aspect);
                     renderer.set_hud_edges(!g_opt.hud_centre);
