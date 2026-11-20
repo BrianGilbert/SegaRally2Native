@@ -84,6 +84,10 @@ struct FrontendSettings {
     bool menu_music = true; // the game's Main Title in the menus
     bool check_updates = true;     // at launch, news.txt on GitHub: a window with what is new and UPDATE NOW
     int news_seen = 0;             // the newest news.txt entry the player closed with LATER
+    // settings.ini only: UDP telemetry for SimHub and motion rigs (runtime/telemetry.h),
+    // to 127.0.0.1 on this port. Off by default
+    bool telemetry = false;
+    int telemetry_port = 20777;
 
     // save/settings.ini; missing keys keep their current value. section: "" the
     // file's first one (PC EDITION and the keys of the whole game), "arcade" ARCADE ORIGINAL's
@@ -228,7 +232,7 @@ private:
         DEBUG, DEBUG_COURSE, DEBUG_CAR, DEBUG_GEARS, DEBUG_TIME, DEBUG_GO,
         OPT_QUALITY,   // (no row: the first of the option ids, the ones >= it are options)
         OPT_DISPLAY, OPT_VOLUME, OPT_MUSIC, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SUN, OPT_SHADOWS, OPT_SOFT, OPT_HDR, OPT_SHARPEN, OPT_HUD, OPT_LIVERIES,
-        OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_VIBRATION, OPT_RT, OPT_MENU_MUSIC, OPT_REFLECT, OPT_GI, OPT_DUST, OPT_OBJECTS, OPT_UPDATES,
+        OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_VIBRATION, OPT_RT, OPT_MENU_MUSIC, OPT_REFLECT, OPT_GI, OPT_DUST, OPT_OBJECTS, OPT_UPDATES, OPT_TELEMETRY,
         OPT_DIFFICULTY, OPT_CONNECTED, OPT_TRIGGERS, OPT_RESOLUTION, OPT_SCALE, OPT_VSYNC, OPT_MAXFPS, OPT_BGFPS,
         OPT_EXPERIENCE, OPT_ASPECT, OPT_ARCADE_ASPECT,
         OPT_WHEEL,   // CONTROLS > WHEEL: one row per wheel_lines entry (Item::index)   // OPT_ARCADE_ASPECT: ARCADE ORIGINAL's, under EXPERIENCE

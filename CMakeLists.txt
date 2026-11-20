@@ -208,6 +208,7 @@ add_executable(SegaRally2 WIN32
     src/runtime/wheel.cpp
     src/runtime/scsi53c810.cpp
     src/runtime/stats.cpp
+    src/runtime/telemetry.cpp
     src/runtime/game_hooks.cpp
     src/runtime/achievements_csv.cpp
     src/ui/achievement_toast.cpp
@@ -289,7 +290,7 @@ file(CONFIGURE OUTPUT ${ICONS_DIR}/achievement_icons.h CONTENT "${icons_h}")
 target_include_directories(SegaRally2 PRIVATE ${ICONS_DIR})
 # volk loads vulkan-1.dll at runtime: the SDK is not needed
 target_compile_definitions(SegaRally2 PRIVATE VK_NO_PROTOTYPES VK_USE_PLATFORM_WIN32_KHR)
-target_link_libraries(SegaRally2 PRIVATE SDL3::SDL3-static winmm ole32 oleaut32 windowscodecs mfplat mfuuid gdi32 dwmapi shell32 winhttp
+target_link_libraries(SegaRally2 PRIVATE SDL3::SDL3-static winmm ole32 oleaut32 windowscodecs mfplat mfuuid gdi32 dwmapi shell32 winhttp ws2_32
     ${DLSS_LIB})
 
 if(MSVC)
